@@ -34,6 +34,7 @@ TEMP_DIR="/tmp/realm_install"
 # 脚本版本与官方源
 SCRIPT_VERSION="2.0.0"
 GITHUB_REPO="zhboner/realm"
+SCRIPT_RAW_URL="https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh"
 
 # 默认加速源 (可切换)
 GH_MIRROR=""
@@ -249,7 +250,11 @@ install_realm() {
     rm -rf "$TEMP_DIR"
 
     # 安装管理脚本到系统全局命令 (支持 re 与 realm 双快捷指令)
-    cp -f "$0" "$SCRIPT_PATH" 2>/dev/null || true
+    if [[ -f "$0" && "$0" != *"bash"* && "$0" != *"/dev/fd"* ]]; then
+        cp -f "$0" "$SCRIPT_PATH" 2>/dev/null || true
+    else
+        curl -fsSL "${GH_MIRROR}${SCRIPT_RAW_URL}" -o "$SCRIPT_PATH" 2>/dev/null || wget -qO "$SCRIPT_PATH" "${GH_MIRROR}${SCRIPT_RAW_URL}" 2>/dev/null || true
+    fi
     chmod +x "$SCRIPT_PATH" 2>/dev/null || true
     ln -sf "$SCRIPT_PATH" "$SHORT_SCRIPT_PATH" 2>/dev/null || cp -f "$SCRIPT_PATH" "$SHORT_SCRIPT_PATH" 2>/dev/null || true
     chmod +x "$SHORT_SCRIPT_PATH" 2>/dev/null || true
