@@ -414,11 +414,19 @@ list_rules() {
 
 backup_config() {
     mkdir -p "$BACKUP_DIR"
-    local bak_file="${BACKUP_DIR}/config_$(date +%Y%m%d_%H%M%S).toml.bak"
-    cp -f "$CONFIG_FILE" "$bak_file"
+    if [[ -f "$CONFIG_FILE" ]]; then
+        local bak_file="${BACKUP_DIR}/config_$(date +%Y%m%d_%H%M%S).toml.bak"
+        cp -f "$CONFIG_FILE" "$bak_file"
+    fi
 }
 
 add_rule() {
+    # 自动检测是否已安装核心服务，若未安装则自动执行安装初始化
+    if [[ ! -f "$BIN_PATH" || ! -f "$SERVICE_FILE" || ! -f "$CONFIG_FILE" ]]; then
+        warn "检测到 Realm 核心服务尚未安装或未初始化，正在自动进行安装..."
+        install_realm || return 1
+    fi
+
     echo -e "\n${BOLD}${GREEN}=== 添加新的端口转发规则 ===${PLAIN}"
 
     # 1. 监听端口
