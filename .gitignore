@@ -1,9 +1,0 @@
-# Ignore downloaded upstream repositories
-/realm/
-/realm-installer/
-
-# OS and Temp files
-.DS_Store
-Thumbs.db
-*.tmp
-*.bak
