@@ -4,7 +4,7 @@
 
 **基于 [zhboner/realm](https://github.com/zhboner/realm) 核心打造的专业级 Linux VPS 网络中转管理面板**
 
-[![Release](https://img.shields.io/badge/version-2.1.1-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
+[![Release](https://img.shields.io/badge/version-2.1.2-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine%20%7C%20Arch-orange.svg?style=flat-square)](#-系统与架构支持)
 [![Arch](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64%20%7C%20armv7-brightgreen.svg?style=flat-square)](#-系统与架构支持)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
