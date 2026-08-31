@@ -487,7 +487,7 @@ update_script() {
     info "正在检测 GitHub 远程最新版本..."
     local tmp_script
     tmp_script=$(mktemp /tmp/realm_script.XXXXXX)
-    if curl -fsSL --connect-timeout 10 "${GH_MIRROR}${SCRIPT_RAW_URL}" -o "$tmp_script" 2>/dev/null || wget -q --timeout=10 -O "$tmp_script" "${GH_MIRROR}${SCRIPT_RAW_URL}" 2>/dev/null; then
+    if curl -fsSL --connect-timeout 10 "${GH_MIRROR}${SCRIPT_RAW_URL}?t=$(date +%s)" -o "$tmp_script" 2>/dev/null || wget -q --timeout=10 -O "$tmp_script" "${GH_MIRROR}${SCRIPT_RAW_URL}?t=$(date +%s)" 2>/dev/null; then
         if grep -q "Realm" "$tmp_script" 2>/dev/null && grep -q "show_menu" "$tmp_script" 2>/dev/null; then
             local remote_ver
             remote_ver=$(grep -m1 '^SCRIPT_VERSION=' "$tmp_script" | cut -d'"' -f2)
