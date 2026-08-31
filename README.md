@@ -4,9 +4,9 @@
 
 **基于 [zhboner/realm](https://github.com/zhboner/realm) 核心打造的专业级 Linux VPS 网络中转管理面板**
 
-[![Release](https://img.shields.io/badge/version-2.0.0-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
+[![Release](https://img.shields.io/badge/version-2.1.0-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine%20%7C%20Arch-orange.svg?style=flat-square)](#-系统与架构支持)
-[![Arch](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64%20%7C%20armv7%20%7C%20i686-brightgreen.svg?style=flat-square)](#-系统与架构支持)
+[![Arch](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64%20%7C%20armv7-brightgreen.svg?style=flat-square)](#-系统与架构支持)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Core](https://img.shields.io/badge/core-Rust%20%2F%20Realm%20v2.x-red.svg?style=flat-square)](https://github.com/zhboner/realm)
 
@@ -29,18 +29,21 @@
 - ⚡ **全局极简快捷键**：安装后在终端输入 **`re`** 即可呼出全功能交互面板（亦兼容 `realm`）。
 - 📋 **完整规则生命周期 (CRUD)**：
   - 结构化表格清晰罗列所有监听与转发节点。
-  - 支持按规则序号精确定位并删除，删除时同步移除防火墙放行规则。
+  - 基于 `rules.d/` 原子化单文件架构，增删改查不污染其他规则，删除时同步移除防火墙放行规则。
   - 自动备份配置文件并支持语法异常时一键回滚。
-- 🛡️ **全端口特权绑定**：修复原版 Systemd 沙箱权限缺陷，正确赋予 `CAP_NET_BIND_SERVICE`，完美支持 **80 / 443 / 53** 等特权端口。
+- 🛡️ **全端口特权绑定与安全加固**：
+  - 修复原版 Systemd 沙箱权限缺陷，正确赋予 `CAP_NET_BIND_SERVICE`，完美支持 **80 / 443 / 53** 等特权端口。
+  - 下载二进制直连官方 API 执行不可变 **SHA-256 完整性哈希校验**，杜绝第三方镜像投毒。
+  - 自动适配 SELinux 安全上下文（支持 CentOS / Rocky / Fedora）。
 - 🌐 **双栈与协议增强**：
-  - 智能识别 IPv4 / IPv6 并自动格式化（自动补充 `[...]` 括号）。
+  - 智能识别与清洗 IPv4 / IPv6，自动格式化补齐 `[...]` 方括号。
   - 支持 **HAProxy PROXY Protocol (v1/v2)**，中转节点可无缝传递客户端真实源 IP。
 - 🚀 **生产级系统调优**：
-  - 预设 `LimitNOFILE=1048576` 与 `LimitNPROC=512`，解除高并发场景下的句柄瓶颈。
+  - 预设 `LimitNOFILE=1048576`，解除高并发场景下的句柄瓶颈。
   - 配置 `Restart=on-failure` 与 `RestartSec=3s` 守护进程高可用。
 - 🌏 **双网络镜像加速**：内置 GitHub 官方直连及多组高速 CDN 镜像代理（如 `ghproxy`），解决大陆 VPS 拉取 Releases 失败问题。
-- 🔧 **集成网络诊断工具**：内置 TCP 握手延时测试、连通性探测以及实时日志滚动追踪。
-- 💻 **命令行直接传参**：支持不进入交互菜单直接执行 `re add`、`re ls`、`re restart` 等 CLI 指令。
+- 🔧 **集成综合诊断体检 (Doctor)**：内置全链路 TCP 握手延时测试、连通性探测以及 Journald 实时日志滚动追踪。
+- 💻 **命令行直接传参**：支持不进入交互菜单直接执行 `re add`、`re ls`、`re doctor` 等 CLI 指令。
 
 ---
 
@@ -48,7 +51,7 @@
 
 ### 1. 一键安装命令
 
-登录你的中转机 VPS，在终端中执行以下命令即可：
+登录你的中转机 VPS，在终端中以 root 权限执行以下命令即可：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh)
@@ -75,21 +78,23 @@ re
 ╔═══════════════════════════════════════════════════════════╗
 ║         Realm 高性能网络中转管理面板 (Pro 增强版)         ║
 ╚═══════════════════════════════════════════════════════════╝
- 状态: 运行中 | 快捷指令: re | 版本: 2.0.0 | 规则数: 3
+ 状态: 运行中 | 自启: 已启用 | 指令: re | 核心版本: 2.9.6 | 规则数: 3
 -------------------------------------------------------------
- 1. 添加转发规则 (端口/IP/PROXY协议)
+ 1. 添加转发规则 (端口/IPv4/IPv6/PROXY协议)
  2. 查看所有转发规则
- 3. 删除指定转发规则
- 4. 直接编辑配置文件 (/etc/realm/config.toml)
+ 3. 修改已有转发规则
+ 4. 删除指定转发规则
+ 5. 编辑全局配置文件 (/etc/realm/00-global.toml)
 -------------------------------------------------------------
- 5. 启动服务
- 6. 停止服务
- 7. 重启服务
- 8. 查看实时运行日志
- 9. 目标网络连通性诊断 (Ping/TCP)
+ 6. 启动服务
+ 7. 停止服务
+ 8. 重启服务
+ 9. 查看实时运行日志
+ 10. 综合系统与链路体检 (Doctor)
+ 11. 目标网络连通性诊断 (Ping/TCP)
 -------------------------------------------------------------
- 10. 安装 / 更新 Realm 核心到最新版
- 11. 卸载 Realm 及相关配置
+ 12. 安装 / 更新 Realm 核心到最新版
+ 13. 卸载 Realm 及相关配置
  0. 退出管理面板
 -------------------------------------------------------------
 ```
@@ -116,22 +121,23 @@ re
 
 1. 登录中转机（VPS A）终端，以 `root` 用户运行一键安装命令；
 2. 安装过程中选择下载镜像源（境外 VPS 选 `1. 官方直连`，大陆 VPS 选 `2. ghproxy 加速`）；
-3. 脚本会自动下载二进制、配置 Systemd 服务并放行基础运行环境。
+3. 脚本会自动下载二进制、校验 SHA-256、配置 Systemd / OpenRC 服务并放行基础运行环境。
 
 ---
 
 ### 步骤二：添加端口转发规则
 
-输入 `re` 唤出菜单，选择 **`[1] 添加转发规则`**：
+输入 `re` 唤出菜单，选择 **`[1] 添加转发规则`**（亦可直接运行 `re add`）：
 
 1. **输入中转机本地监听端口**：例如 `6666`（客户端将连接中转机的这个端口）；
-2. **输入落地机 IP 或域名**：例如 `1.2.3.4` 或 `hk.example.com`（如果是 IPv6 地址直接粘贴即可，脚本会自动识别补充方括号）；
-3. **输入落地机目标端口**：例如 `443`（落地机上对应服务实际监听的端口）；
-4. **选择是否启用 PROXY Protocol**：
+2. **选择监听地址类型**：例如 `0.0.0.0`（全部 IPv4）或 `[::]`（IPv4+IPv6 双栈）；
+3. **输入落地机 IP 或域名**：例如 `1.2.3.4` 或 `hk.example.com`（若是 IPv6 地址直接粘贴即可，脚本会自动识别补充方括号）；
+4. **输入落地机目标端口**：例如 `443`（落地机上对应服务实际监听的端口）；
+5. **选择是否启用 PROXY Protocol**：
    - **绝大多数普通中转**：选 `1. 不开启`（默认）；
    - **落地节点配置了 PROXY 协议接收真实 IP**：选 `2. 开启 v2`；
-5. **输入备注说明**：例如 `香港BGP中转-美西落地`；
-6. 脚本将自动写入配置、放行中转机防火墙、重启 Realm 服务并验证连通性。
+6. **输入备注说明**：例如 `香港BGP中转-美西落地`；
+7. 脚本将自动写入独立的 `rules.d/` 规则、放行中转机防火墙、重启 Realm 服务并验证连通性。
 
 ---
 
@@ -153,8 +159,10 @@ re
 ### 步骤四：规则查看、删除与排障
 
 - **查看当前所有规则**：在菜单中按 `2` 或在终端运行 `re ls`，将以清晰表格显示所有转发列表、协议类型与备注。
-- **删除无用规则**：在菜单中按 `3` 或在终端运行 `re del`，输入对应规则的 `ID 序号` 即可秒级移除，同时脚本会自动关闭对应防火墙端口。
-- **测试连通性**：在菜单中按 `9`，输入落地机 IP 和端口，脚本将进行 TCP 握手延时探测，排查落地机网络是否通畅。
+- **修改已有规则**：在菜单中按 `3` 或在终端运行 `re edit`，输入端口号即可原地更新落地目标或备注。
+- **删除无用规则**：在菜单中按 `4` 或在终端运行 `re del`，输入对应规则的 `端口号` 即可秒级移除，同时脚本会自动关闭对应防火墙端口。
+- **综合体检诊断**：在菜单中按 `10` 或在终端运行 `re doctor`，一键审计所有规则监听状态、落地 DNS 解析与 TCP 握手延时。
+- **测试单点连通性**：在菜单中按 `11`，输入落地机 IP 和端口，脚本将进行 TCP 握手延时探测，排查落地机网络是否通畅。
 
 ---
 
@@ -162,19 +170,24 @@ re
 
 除了交互式菜单，脚本还支持在命令行中直接传参执行，适合脚本调用或自动化运维：
 
-| 快捷指令 | 说明 |
-| :--- | :--- |
-| **`re`** | 打开交互式管理控制面板（主菜单） |
-| **`re list`** / **`re ls`** | 快速查看当前所有转发规则表格 |
-| **`re add`** | 快速启动添加转发规则流程 |
-| **`re del`** / **`re rm`** | 快速启动删除指定规则流程 |
-| **`re status`** | 查看 Realm 服务的详细运行状态 |
-| **`re restart`** | 重启 Realm 服务并刷新所有配置 |
-| **`re start`** | 启动 Realm 服务 |
-| **`re stop`** | 停止 Realm 服务 |
-| **`re log`** | 实时滚动查看 Realm 运行日志 |
-| **`re update`** | 检查并更新 Realm 核心程序至最新版 |
-| **`re uninstall`** | 彻底卸载 Realm 服务与相关配置文件 |
+| 快捷指令 | 说明 | 示例 |
+| :--- | :--- | :--- |
+| **`re`** | 打开交互式管理控制面板（主菜单） | `re` |
+| **`re list`** / **`re ls`** | 快速查看当前所有转发规则表格 | `re ls` |
+| **`re add`** | 添加转发规则 (支持参数传参) | `re add -l 6666 -r 1.2.3.4:443 -p 2 -m "BGP中转"` |
+| **`re edit`** | 原地交互式修改已有规则 | `re edit` |
+| **`re del`** / **`re rm`** | 快速启动删除指定规则流程 | `re del` |
+| **`re doctor`** | 执行综合系统与链路健康体检 | `re doctor` |
+| **`re status`** | 查看 Realm 服务的详细运行状态 | `re status` |
+| **`re restart`** | 重启 Realm 服务并刷新所有配置 | `re restart` |
+| **`re start`** | 启动 Realm 服务 | `re start` |
+| **`re stop`** | 停止 Realm 服务 | `re stop` |
+| **`re log`** / **`re logs`** | 实时滚动查看 Realm 运行日志 | `re log` |
+| **`re backup`** | 手动备份当前所有中转规则 | `re backup` |
+| **`re update`** | 检查并更新 Realm 核心程序至最新版 | `re update` |
+| **`re uninstall`** | 彻底卸载 Realm 服务与相关配置文件 | `re uninstall` |
+| **`re version`** / **`-v`** | 查看版本信息 | `re -v` |
+| **`re help`** / **`-h`** | 查看帮助手册 | `re -h` |
 
 ---
 
@@ -216,29 +229,29 @@ re
 
 - **主程序路径**：`/usr/local/bin/realm-bin`
 - **快捷指令**：`/usr/local/bin/re` & `/usr/local/bin/realm`
-- **配置文件**：`/etc/realm/config.toml`
+- **规则目录 (单文件架构)**：`/etc/realm/rules.d/*.toml`
+- **全局配置文件**：`/etc/realm/00-global.toml`
 - **配置备份目录**：`/etc/realm/backup/`
-- **日志文件**：`/var/log/realm/realm.log`
 - **Systemd 服务**：`/etc/systemd/system/realm.service`
+- **OpenRC 服务 (Alpine)**：`/etc/init.d/realm`
 
 ---
 
 ## 🐧 系统与架构支持
 
 ### 支持的 Linux 发行版
-- **Debian** 9+
+- **Debian** 10+
 - **Ubuntu** 18.04+
-- **CentOS** / **RHEL** 7+
+- **CentOS** / **RHEL** 8+
 - **Rocky Linux** / **AlmaLinux** 8+
-- **Fedora** 30+
-- **Alpine Linux** 3.12+
+- **Fedora** 32+
+- **Alpine Linux** 3.12+ (musl + OpenRC)
 - **Arch Linux**
 
 ### 支持的 CPU 架构
-- `x86_64` (AMD64)
+- `x86_64` (AMD64, 自动识别 glibc / musl 资产)
 - `aarch64` (ARM64, 如甲骨文 ARM、AWS Graviton)
-- `armv7` / `armhf`
-- `i686` (386)
+- `armv7` / `armhf` (树莓派等 32 位 ARM 设备)
 
 ---
 
@@ -247,18 +260,18 @@ re
 ### Q1: 转发配置完成后，客户端连接不通怎么办？
 请按以下顺序依次排查：
 1. **中转机本地防火墙**：虽然脚本会自动放行系统防火墙，但如果使用腾讯云、阿里云、AWS、甲骨文云，务必进入**云厂商网页控制台 ➔ 安全组 (Security Group)**，放行中转机对应的入站端口。
-2. **落地机连通性**：在菜单中选择 `[9] 目标网络连通性诊断`，测试中转机是否能连通落地机的 IP 与端口。
+2. **全链路综合体检**：在终端输入 `re doctor`，检查本地端口是否监听中，以及中转机到落地机的 TCP 延时。
 3. **证书与 SNI 校验**：如果节点开启了 TLS，确认客户端中的 `SNI / 伪装域名` 仍然填写的是落地机的域名，而不是中转机 IP。
 
 ### Q2: 为什么中转机内存占用这么低？
 `zhboner/realm` 由纯 Rust 开发，没有 Go 语言的 GC 垃圾回收开销，异步并发机制极为高效。日常稳定占用仅 **5MB ~ 15MB** 内存，极适合 256MB/512MB 的低配 VPS。
 
 ### Q3: 如何备份或迁移配置？
-所有中转规则均保存在 `/etc/realm/config.toml` 文件中。
+所有中转规则均保存在 `/etc/realm/rules.d/` 目录中。
 若需要更换 VPS：
-1. 复制原机器的 `/etc/realm/config.toml`；
+1. 在终端运行 `re backup`，将生成的备份文件复制到新 VPS；
 2. 在新 VPS 上安装本脚本；
-3. 将文件覆盖到新 VPS 的 `/etc/realm/config.toml` 并运行 `re restart` 即可一键还原。
+3. 将备份文件解压覆盖到新机器的 `/etc/realm/` 并运行 `re restart` 即可一键还原。
 
 ---
 
