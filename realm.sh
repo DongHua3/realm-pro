@@ -1153,47 +1153,58 @@ run_doctor() {
         fi
     fi
 
-    # 2. 规则与网络连通性逐条审计
+    # 2. 规则连通性 (异步并发高速体检)
     echo -e "\n${BOLD}[2/4] 转发规则与链路连通性体检${PLAIN}"
     local rule_files
     rule_files=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null || true)
     if [[ -z "$rule_files" ]]; then
-        echo "  - 暂无任何转发规则。"
+        echo "  - 暂无任何转发规则"
     else
+        local tmp_doc_dir
+        tmp_doc_dir=$(mktemp -d /tmp/realm_doc.XXXXXX)
+        local idx=0
+
         for rf in $rule_files; do
-            local rule_info
-            rule_info=$(parse_single_rule_file "$rf")
-            IFS="|" read -r port listen remote proxy remark <<< "$rule_info"
+            idx=$((idx + 1))
+            (
+                local rule_info
+                rule_info=$(parse_single_rule_file "$rf")
+                IFS="|" read -r port listen remote proxy remark <<< "$rule_info"
 
-            local r_host r_port
-            r_host=$(echo "$remote" | awk -F':' 'NF>1{print $1}' | sed 's/\[//;s/\]//')
-            r_port=$(echo "$remote" | awk -F':' '{print $NF}')
+                local r_host r_port
+                r_host=$(echo "$remote" | awk -F':' 'NF>1{print $1}' | sed 's/\[//;s/\]//')
+                r_port=$(echo "$remote" | awk -F':' '{print $NF}')
 
-            # 监听状态检测
-            local listen_stat="${RED}未监听${PLAIN}"
-            if is_port_in_use "$port"; then
-                listen_stat="${GREEN}监听中${PLAIN}"
-            fi
-
-            # 落地端 TCP 握手探测
-            local r_stat="${RED}连接失败${PLAIN}"
-            if timeout 2 bash -c "exec 3<>/dev/tcp/${r_host}/${r_port}" >/dev/null 2>&1; then
-                r_stat="${GREEN}TCP连通${PLAIN}"
-            elif command -v nc >/dev/null 2>&1 && timeout 2 nc -w 2 -z "$r_host" "$r_port" >/dev/null 2>&1; then
-                r_stat="${GREEN}TCP连通${PLAIN}"
-            elif command -v curl >/dev/null 2>&1; then
-                local curl_target="$r_host"
-                [[ "$curl_target" =~ : ]] && curl_target="[${curl_target}]"
-                if curl -s --connect-timeout 2 "telnet://${curl_target}:${r_port}" 2>&1 | grep -E -q "Connected|refused"; then
-                    r_stat="${GREEN}TCP连通${PLAIN}"
+                # 监听状态检测
+                local listen_stat="${RED}未监听${PLAIN}"
+                if is_port_in_use "$port"; then
+                    listen_stat="${GREEN}监听中${PLAIN}"
                 fi
-            fi
 
-            echo -e "  - 端口 [${BOLD}${YELLOW}${port}${PLAIN}] ➔ ${remote} (${remark})"
-            echo -e "    本地: ${listen_stat} | 落地网络: ${r_stat} | PROXY协议: ${proxy}"
+                # 落地端 TCP 握手并发探测 (限时 1.5s)
+                local r_stat="${RED}连接失败${PLAIN}"
+                if timeout 1.5 bash -c "exec 3<>/dev/tcp/${r_host}/${r_port}" >/dev/null 2>&1; then
+                    r_stat="${GREEN}TCP连通${PLAIN}"
+                elif command -v nc >/dev/null 2>&1 && timeout 1.5 nc -w 1 -z "$r_host" "$r_port" >/dev/null 2>&1; then
+                    r_stat="${GREEN}TCP连通${PLAIN}"
+                elif command -v curl >/dev/null 2>&1; then
+                    local curl_target="$r_host"
+                    [[ "$curl_target" =~ : ]] && curl_target="[${curl_target}]"
+                    if curl -s --connect-timeout 1.5 "telnet://${curl_target}:${r_port}" 2>&1 | grep -E -q "Connected|refused"; then
+                        r_stat="${GREEN}TCP连通${PLAIN}"
+                    fi
+                fi
+
+                echo -e "  - 端口 [${BOLD}${YELLOW}${port}${PLAIN}] ➔ ${remote} (${remark})\n    本地: ${listen_stat} | 落地网络: ${r_stat} | PROXY协议: ${proxy}" > "${tmp_doc_dir}/${idx}.res"
+            ) &
         done
-    fi
+        wait
 
+        for ((i = 1; i <= idx; i++)); do
+            [[ -f "${tmp_doc_dir}/${i}.res" ]] && cat "${tmp_doc_dir}/${i}.res"
+        done
+        rm -rf "$tmp_doc_dir"
+    fi
     # 3. 防火墙状态检测
     echo -e "\n${BOLD}[3/4] 防火墙环境审计${PLAIN}"
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw "active"; then
