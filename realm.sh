@@ -35,7 +35,7 @@ SCRIPT_PATH="/usr/local/bin/realm"
 SHORT_SCRIPT_PATH="/usr/local/bin/re"
 
 # 脚本版本与官方源
-SCRIPT_VERSION="2.1.0"
+SCRIPT_VERSION="2.1.1"
 GITHUB_REPO="zhboner/realm"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh"
 
