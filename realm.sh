@@ -492,31 +492,47 @@ migrate_legacy_config() {
         mkdir -p "${BACKUP_DIR}"
         cp -f "$LEGACY_CONFIG" "${BACKUP_DIR}/config_legacy.toml.bak"
 
-        # 使用 awk 提取每个 endpoint 并写入 rules.d
+        # 使用 awk 提取每个 endpoint 并清洗转换写入 rules.d
         awk -v rdir="$RULES_DIR" '
-            BEGIN { in_ep=0; block=""; lport="" }
+            BEGIN { in_ep=0; lport=""; has_proxy=0; pver=2; remark="" }
             /^\[\[endpoints\]\]/ {
                 if (in_ep == 1 && lport != "") {
                     fname = rdir "/" lport ".toml";
-                    print block > fname;
+                    print "[[endpoints]]" > fname;
+                    if (remark != "") print remark > fname;
+                    print listen_line > fname;
+                    print remote_line > fname;
+                    if (has_proxy == 1) {
+                        print "network = { send_proxy = true, send_proxy_version = " pver " }" > fname;
+                    }
                     close(fname);
                 }
-                in_ep=1; block=$0 "\n"; lport=""; next
+                in_ep=1; lport=""; has_proxy=0; pver=2; remark=""; next
             }
             {
                 if (in_ep == 1) {
-                    block = block $0 "\n";
+                    if ($0 ~ /^# *remark *=/) remark=$0;
                     if ($0 ~ /^listen *=/) {
+                        listen_line=$0;
                         split($0, arr, ":");
                         gsub(/[^0-9]/, "", arr[length(arr)]);
                         lport = arr[length(arr)];
                     }
+                    if ($0 ~ /^remote *=/) remote_line=$0;
+                    if ($0 ~ /^send_proxy *= *true/) has_proxy=1;
+                    if ($0 ~ /^send_proxy_version *= *1/) pver=1;
                 }
             }
             END {
                 if (in_ep == 1 && lport != "") {
                     fname = rdir "/" lport ".toml";
-                    print block > fname;
+                    print "[[endpoints]]" > fname;
+                    if (remark != "") print remark > fname;
+                    print listen_line > fname;
+                    print remote_line > fname;
+                    if (has_proxy == 1) {
+                        print "network = { send_proxy = true, send_proxy_version = " pver " }" > fname;
+                    }
                     close(fname);
                 }
             }
