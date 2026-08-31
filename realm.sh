@@ -585,8 +585,9 @@ migrate_legacy_config() {
 
         touch "${CONF_DIR}/.migrated"
         local new_count
-        new_count=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null | wc -l || echo "0")
+        new_count=$(count_rules)
         if [[ "$new_count" -gt 0 ]]; then
+            setup_service
             success "历史配置已成功恢复并无缝迁移！共恢复 ${new_count} 条中转规则！"
         fi
     fi
@@ -1115,14 +1116,18 @@ run_doctor() {
 
             # 落地端 TCP 握手探测
             local r_stat="${RED}连接失败${PLAIN}"
-            if command -v nc >/dev/null 2>&1; then
-                if nc -w 3 -z "$r_host" "$r_port" 2>/dev/null || nc -z -v -w 3 "$r_host" "$r_port" 2>/dev/null; then
+            if command -v timeout >/dev/null 2>&1 && command -v nc >/dev/null 2>&1; then
+                if timeout 2 nc -w 2 -z "$r_host" "$r_port" >/dev/null 2>&1; then
+                    r_stat="${GREEN}TCP连通${PLAIN}"
+                fi
+            elif command -v nc >/dev/null 2>&1; then
+                if nc -w 2 -z "$r_host" "$r_port" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 fi
             elif command -v curl >/dev/null 2>&1; then
                 local curl_target="$r_host"
                 [[ "$curl_target" =~ : ]] && curl_target="[${curl_target}]"
-                if curl -s --connect-timeout 3 "telnet://${curl_target}:${r_port}" 2>&1 | grep -E -q "Connected|refused"; then
+                if curl -s --connect-timeout 2 "telnet://${curl_target}:${r_port}" 2>&1 | grep -E -q "Connected|refused"; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 fi
             fi
