@@ -502,91 +502,86 @@ migrate_legacy_config() {
         rule_count=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null | wc -l || echo "0")
     fi
 
-    # 如果 rules.d 为空，或存在未迁移的旧版 config.toml，则尝试从历史配置/备份中恢复
+    # 如果 rules.d 为空，或存在未迁移的旧版 config.toml，则全面扫描历史文件进行恢复
     if [[ "$rule_count" -eq 0 ]] || [[ -f "$LEGACY_CONFIG" && ! -f "${CONF_DIR}/.migrated" ]]; then
-        local src_file=""
-        if [[ -f "$LEGACY_CONFIG" ]]; then
-            src_file="$LEGACY_CONFIG"
-        elif [[ -f "${LEGACY_CONFIG}.bak" ]]; then
-            src_file="${LEGACY_CONFIG}.bak"
-        elif [[ -f "${BACKUP_DIR}/config_legacy.toml.bak" ]]; then
-            src_file="${BACKUP_DIR}/config_legacy.toml.bak"
-        else
-            # 搜索 backup 目录下的历史备份
-            src_file=$(ls -1t "${BACKUP_DIR}"/config_*.toml.bak 2>/dev/null | head -n 1 || true)
-        fi
+        mkdir -p "${BACKUP_DIR}" "${RULES_DIR}"
 
-        if [[ -n "$src_file" && -f "$src_file" ]] && grep -q "endpoints" "$src_file" 2>/dev/null; then
-            info "检测到历史配置文件 ($src_file)，正在自动解析并迁移规则..."
-            mkdir -p "${BACKUP_DIR}" "${RULES_DIR}"
-            [[ "$src_file" == "$LEGACY_CONFIG" ]] && cp -f "$src_file" "${BACKUP_DIR}/config_legacy.toml.bak"
+        # 扫描 /etc/realm 及其子目录下所有包含 listen 关键字的历史文件 (排除 rules.d/ 与 00-global.toml)
+        local candidate_files
+        candidate_files=$(find "$CONF_DIR" -maxdepth 2 -type f ! -path "*/rules.d/*" ! -name "00-global.toml" ! -name ".migrated" 2>/dev/null || true)
 
-            # 极度健壮的规则提取器 (支持任意缩进、引号、CRLF、首尾空格)
-            awk -v rdir="$RULES_DIR" '
-                BEGIN { in_ep=0; lport=""; has_proxy=0; pver=2; remark=""; listen_val=""; remote_val="" }
-                /^[[:space:]]*\[\[endpoints\]\]/ {
-                    if (in_ep == 1 && lport != "" && remote_val != "") {
-                        fname = rdir "/" lport ".toml";
-                        print "[[endpoints]]" > fname;
-                        if (remark != "") print remark > fname;
-                        print "listen = \"" listen_val "\"" > fname;
-                        print "remote = \"" remote_val "\"" > fname;
-                        if (has_proxy == 1) {
-                            print "network = { send_proxy = true, send_proxy_version = " pver " }" > fname;
+        for src_file in $candidate_files; do
+            if grep -q -E "listen[[:space:]]*=" "$src_file" 2>/dev/null; then
+                info "检测到历史配置文件: ${src_file}，正在提取规则..."
+
+                # 极度健壮的规则提取器 (支持 [[endpoints]] 与 [[endpoint]]、任意缩进、引号、CRLF)
+                awk -v rdir="$RULES_DIR" '
+                    BEGIN { in_ep=0; lport=""; has_proxy=0; pver=2; remark=""; listen_val=""; remote_val="" }
+                    /^[[:space:]]*\[\[endpoints?\]\]/ {
+                        if (in_ep == 1 && lport != "" && remote_val != "") {
+                            fname = rdir "/" lport ".toml";
+                            print "[[endpoints]]" > fname;
+                            if (remark != "") print remark > fname;
+                            print "listen = \"" listen_val "\"" > fname;
+                            print "remote = \"" remote_val "\"" > fname;
+                            if (has_proxy == 1) {
+                                print "network = { send_proxy = true, send_proxy_version = " pver " }" > fname;
+                            }
+                            close(fname);
                         }
-                        close(fname);
+                        in_ep=1; lport=""; has_proxy=0; pver=2; remark=""; listen_val=""; remote_val=""; next
                     }
-                    in_ep=1; lport=""; has_proxy=0; pver=2; remark=""; listen_val=""; remote_val=""; next
-                }
-                {
-                    if (in_ep == 1) {
-                        gsub(/\r/, "", $0);
-                        if ($0 ~ /^[[:space:]]*#[[:space:]]*remark[[:space:]]*=/) {
-                            remark=$0;
-                            gsub(/^[[:space:]]+/, "", remark);
+                    {
+                        if (in_ep == 1) {
+                            gsub(/\r/, "", $0);
+                            if ($0 ~ /^[[:space:]]*#[[:space:]]*remark[[:space:]]*=/) {
+                                remark=$0;
+                                gsub(/^[[:space:]]+/, "", remark);
+                            }
+                            if ($0 ~ /^[[:space:]]*listen[[:space:]]*=/) {
+                                line=$0;
+                                gsub(/^[[:space:]]*listen[[:space:]]*=[[:space:]]*["\x27]?/, "", line);
+                                gsub(/["\x27].*$/, "", line);
+                                listen_val=line;
+                                split(listen_val, arr, ":");
+                                gsub(/[^0-9]/, "", arr[length(arr)]);
+                                lport=arr[length(arr)];
+                            }
+                            if ($0 ~ /^[[:space:]]*remote[[:space:]]*=/) {
+                                line=$0;
+                                gsub(/^[[:space:]]*remote[[:space:]]*=[[:space:]]*["\x27]?/, "", line);
+                                gsub(/["\x27].*$/, "", line);
+                                remote_val=line;
+                            }
+                            if ($0 ~ /send_proxy[[:space:]]*=[[:space:]]*true/) has_proxy=1;
+                            if ($0 ~ /send_proxy_version[[:space:]]*=[[:space:]]*1/) pver=1;
                         }
-                        if ($0 ~ /^[[:space:]]*listen[[:space:]]*=/) {
-                            line=$0;
-                            gsub(/^[[:space:]]*listen[[:space:]]*=[[:space:]]*["\x27]?/, "", line);
-                            gsub(/["\x27].*$/, "", line);
-                            listen_val=line;
-                            split(listen_val, arr, ":");
-                            gsub(/[^0-9]/, "", arr[length(arr)]);
-                            lport=arr[length(arr)];
-                        }
-                        if ($0 ~ /^[[:space:]]*remote[[:space:]]*=/) {
-                            line=$0;
-                            gsub(/^[[:space:]]*remote[[:space:]]*=[[:space:]]*["\x27]?/, "", line);
-                            gsub(/["\x27].*$/, "", line);
-                            remote_val=line;
-                        }
-                        if ($0 ~ /send_proxy[[:space:]]*=[[:space:]]*true/) has_proxy=1;
-                        if ($0 ~ /send_proxy_version[[:space:]]*=[[:space:]]*1/) pver=1;
                     }
-                }
-                END {
-                    if (in_ep == 1 && lport != "" && remote_val != "") {
-                        fname = rdir "/" lport ".toml";
-                        print "[[endpoints]]" > fname;
-                        if (remark != "") print remark > fname;
-                        print "listen = \"" listen_val "\"" > fname;
-                        print "remote = \"" remote_val "\"" > fname;
-                        if (has_proxy == 1) {
-                            print "network = { send_proxy = true, send_proxy_version = " pver " }" > fname;
+                    END {
+                        if (in_ep == 1 && lport != "" && remote_val != "") {
+                            fname = rdir "/" lport ".toml";
+                            print "[[endpoints]]" > fname;
+                            if (remark != "") print remark > fname;
+                            print "listen = \"" listen_val "\"" > fname;
+                            print "remote = \"" remote_val "\"" > fname;
+                            if (has_proxy == 1) {
+                                print "network = { send_proxy = true, send_proxy_version = " pver " }" > fname;
+                            }
+                            close(fname);
                         }
-                        close(fname);
                     }
-                }
-            ' "$src_file"
+                ' "$src_file"
 
-            touch "${CONF_DIR}/.migrated"
-            [[ -f "$LEGACY_CONFIG" ]] && mv -f "$LEGACY_CONFIG" "${LEGACY_CONFIG}.bak"
-
-            local new_count
-            new_count=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null | wc -l || echo "0")
-            if [[ "$new_count" -gt 0 ]]; then
-                success "历史配置已成功恢复并无缝迁移！共恢复 ${new_count} 条中转规则！"
+                # 若是当前 config.toml，则重命名备份避免与 rules.d 冲突
+                [[ "$src_file" == "$LEGACY_CONFIG" ]] && mv -f "$LEGACY_CONFIG" "${LEGACY_CONFIG}.bak"
             fi
+        done
+
+        touch "${CONF_DIR}/.migrated"
+        local new_count
+        new_count=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null | wc -l || echo "0")
+        if [[ "$new_count" -gt 0 ]]; then
+            success "历史配置已成功恢复并无缝迁移！共恢复 ${new_count} 条中转规则！"
         fi
     fi
 }
