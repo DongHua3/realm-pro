@@ -1271,7 +1271,8 @@ get_status_info() {
     fi
 
     VER_TAG=$("$BIN_PATH" -v 2>/dev/null | awk '{print $2}')
-    [[ -z "$VER_TAG" ]] && VER_TAG="已安装"
+    VER_TAG="${VER_TAG#v}"
+    [[ -z "$VER_TAG" ]] && VER_TAG="未安装"
 
     RULE_COUNT=$(count_rules)
 
@@ -1290,7 +1291,7 @@ show_menu() {
 ${BOLD}${CYAN}╔═══════════════════════════════════════════════════════════╗
 ║         Realm 高性能网络中转管理面板 (Pro 增强版)         ║
 ╚═══════════════════════════════════════════════════════════╝${PLAIN}
- 状态: ${STATUS_TAG} | 自启: ${AUTO_TAG} | 指令: ${BOLD}${YELLOW}re${PLAIN} | 核心版本: ${GREEN}${VER_TAG}${PLAIN} | 规则数: ${YELLOW}${RULE_COUNT}${PLAIN}
+ 状态: ${STATUS_TAG} | 自启: ${AUTO_TAG} | 脚本: ${CYAN}v${SCRIPT_VERSION}${PLAIN} | 核心: ${GREEN}v${VER_TAG}${PLAIN} | 规则数: ${YELLOW}${RULE_COUNT}${PLAIN}
 -------------------------------------------------------------
  ${GREEN}1.${PLAIN} 添加转发规则 (端口/IPv4/IPv6/PROXY协议)
  ${GREEN}2.${PLAIN} 查看所有转发规则
