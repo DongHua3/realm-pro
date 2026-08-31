@@ -523,9 +523,11 @@ init_config_structure() {
     mkdir -p "$CONF_DIR" "$RULES_DIR" "$BACKUP_DIR" "$LOG_DIR"
     chmod 700 "$CONF_DIR" "$BACKUP_DIR"
 
-    # 初始化 00-global.toml 全局配置 (统一日志输出到 stdout 交由 Journald 托管)
+    # 初始化 00-global.toml 全局配置 (必须在首行声明 endpoints = [] 以满足 Realm 反序列化要求)
     if [[ ! -f "$GLOBAL_CONF" ]]; then
         cat > "$GLOBAL_CONF" <<EOF
+endpoints = []
+
 [log]
 level = "warn"
 output = "stdout"
@@ -540,6 +542,11 @@ tcp_keepalive_probe = 3
 EOF
         chmod 600 "$GLOBAL_CONF"
         info "已初始化全局配置文件: $GLOBAL_CONF"
+    else
+        # 兼容性自愈：如果已有 00-global.toml 缺少 endpoints 字段，自动在首行注入
+        if ! grep -q "^endpoints" "$GLOBAL_CONF" 2>/dev/null && ! grep -q "^\[\[endpoints" "$GLOBAL_CONF" 2>/dev/null; then
+            sed -i '1i endpoints = []\n' "$GLOBAL_CONF" 2>/dev/null || true
+        fi
     fi
 
     # 自动迁移旧版本 config.toml 单文件
@@ -1065,6 +1072,10 @@ edit_raw_config() {
 
 restart_service() {
     check_sys
+    # 启动前自愈校验：确保 00-global.toml 包含 endpoints = []
+    if [[ -f "$GLOBAL_CONF" ]] && ! grep -q "^endpoints" "$GLOBAL_CONF" 2>/dev/null && ! grep -q "^\[\[endpoints" "$GLOBAL_CONF" 2>/dev/null; then
+        sed -i '1i endpoints = []\n' "$GLOBAL_CONF" 2>/dev/null || true
+    fi
     info "正在重启 Realm 服务..."
 
     if [[ "$INIT_SYS" == "systemd" ]]; then
