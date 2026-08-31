@@ -1177,14 +1177,10 @@ run_doctor() {
 
             # 落地端 TCP 握手探测
             local r_stat="${RED}连接失败${PLAIN}"
-            if command -v timeout >/dev/null 2>&1 && command -v nc >/dev/null 2>&1; then
-                if timeout 2 nc -w 2 -z "$r_host" "$r_port" >/dev/null 2>&1; then
-                    r_stat="${GREEN}TCP连通${PLAIN}"
-                fi
-            elif command -v nc >/dev/null 2>&1; then
-                if nc -w 2 -z "$r_host" "$r_port" >/dev/null 2>&1; then
-                    r_stat="${GREEN}TCP连通${PLAIN}"
-                fi
+            if timeout 2 bash -c "exec 3<>/dev/tcp/${r_host}/${r_port}" >/dev/null 2>&1; then
+                r_stat="${GREEN}TCP连通${PLAIN}"
+            elif command -v nc >/dev/null 2>&1 && timeout 2 nc -w 2 -z "$r_host" "$r_port" >/dev/null 2>&1; then
+                r_stat="${GREEN}TCP连通${PLAIN}"
             elif command -v curl >/dev/null 2>&1; then
                 local curl_target="$r_host"
                 [[ "$curl_target" =~ : ]] && curl_target="[${curl_target}]"
