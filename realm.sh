@@ -469,6 +469,31 @@ install_realm() {
     fi
 }
 
+update_script() {
+    check_root
+    choose_mirror
+    info "正在从 GitHub 获取最新版 Realm Pro 管理脚本..."
+    local tmp_script
+    tmp_script=$(mktemp /tmp/realm_script.XXXXXX)
+    if curl -fsSL --connect-timeout 10 "${GH_MIRROR}${SCRIPT_RAW_URL}" -o "$tmp_script" 2>/dev/null || wget -q --timeout=10 -O "$tmp_script" "${GH_MIRROR}${SCRIPT_RAW_URL}" 2>/dev/null; then
+        if grep -q "Realm" "$tmp_script" 2>/dev/null && grep -q "show_menu" "$tmp_script" 2>/dev/null; then
+            install -m 755 "$tmp_script" "$SCRIPT_PATH"
+            ln -sf "$SCRIPT_PATH" "$SHORT_SCRIPT_PATH" 2>/dev/null || true
+            chmod +x "$SCRIPT_PATH" "$SHORT_SCRIPT_PATH" 2>/dev/null || true
+            rm -f "$tmp_script"
+            init_config_structure
+            setup_service
+            success "Realm Pro 管理脚本已成功更新至最新版本！"
+            echo ""
+            read -rp "按回车键立即无缝载入新版控制面板..."
+            exec "$SCRIPT_PATH"
+        fi
+    fi
+    rm -f "$tmp_script"
+    error "获取最新脚本失败，请检查网络连接或切换镜像源！"
+}
+
+
 init_config_structure() {
     mkdir -p "$CONF_DIR" "$RULES_DIR" "$BACKUP_DIR" "$LOG_DIR"
     chmod 700 "$CONF_DIR" "$BACKUP_DIR"
@@ -1255,11 +1280,12 @@ ${BOLD}${CYAN}╔═════════════════════
  ${BLUE}10.${PLAIN} 综合系统与链路体检 (Doctor)
  ${BLUE}11.${PLAIN} 目标网络连通性诊断 (Ping/TCP)
 -------------------------------------------------------------
- ${PURPLE}12.${PLAIN} 安装 / 更新 Realm 核心到最新版
- ${PURPLE}13.${PLAIN} 卸载 Realm 及相关配置
+ ${PURPLE}12.${PLAIN} 检查并更新管理脚本 (realm-pro)
+ ${PURPLE}13.${PLAIN} 安装 / 更新 Realm 核心到最新版
+ ${PURPLE}14.${PLAIN} 卸载 Realm 及相关配置
  ${PLAIN}0.${PLAIN} 退出管理面板
 -------------------------------------------------------------"
-        read -rp "请输入选项编号 [0-13]: " choice || break
+        read -rp "请输入选项编号 [0-14]: " choice || break
         case "$choice" in
             1) add_rule ;;
             2) list_rules ;;
@@ -1286,8 +1312,9 @@ ${BOLD}${CYAN}╔═════════════════════
             9) view_logs ;;
             10) run_doctor ;;
             11) network_diagnostic ;;
-            12) install_realm ;;
-            13) uninstall_realm ;;
+            12) update_script ;;
+            13) install_realm ;;
+            14) uninstall_realm ;;
             0) exit 0 ;;
             *)
                 error "请输入有效的选项编号！"
@@ -1311,6 +1338,9 @@ case "$1" in
         ;;
     update)
         install_realm
+        ;;
+    update-script|update_script|self-update)
+        update_script
         ;;
     start)
         check_root
