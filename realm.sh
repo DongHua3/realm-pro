@@ -388,16 +388,28 @@ install_realm() {
     local latest_version
     latest_version=$(curl -fsSL --connect-timeout 10 "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
-    local download_url
-    if [[ -z "$latest_version" ]]; then
-        warn "获取最新版本号失败，尝试拉取最新稳定版资产..."
-        download_url="${GH_MIRROR}https://github.com/${GITHUB_REPO}/releases/latest/download/realm-${REALM_ARCH}.tar.gz"
-    else
-        info "检测到最新版本: ${GREEN}${latest_version}${PLAIN}"
-        download_url="${GH_MIRROR}https://github.com/${GITHUB_REPO}/releases/download/${latest_version}/realm-${REALM_ARCH}.tar.gz"
+    local curr_core_ver=""
+    if [[ -f "$BIN_PATH" ]]; then
+        curr_core_ver=$("$BIN_PATH" -v 2>/dev/null | awk '{print $2}')
     fi
 
-    # 使用安全临时目录
+    local download_url
+    if [[ -z "$latest_version" ]]; then
+        warn "获取最新版本号失败，将拉取最新稳定资产..."
+        download_url="${GH_MIRROR}https://github.com/${GITHUB_REPO}/releases/latest/download/realm-${REALM_ARCH}.tar.gz"
+    else
+        local clean_latest="${latest_version#v}"
+        if [[ -n "$curr_core_ver" && "$curr_core_ver" == "$clean_latest" ]]; then
+            success "当前 Realm 核心已是最新版本 (${GREEN}v${curr_core_ver}${PLAIN})，无需更新！"
+            read -rp "是否强制重新下载并覆盖安装？[y/N 默认 N]: " force_reinstall
+            if [[ "$force_reinstall" != [yY] && "$force_reinstall" != [yY][eE][sS] ]]; then
+                return 0
+            fi
+        else
+            info "发现 Realm 核心升级: 当前 [${YELLOW}${curr_core_ver:-未安装}${PLAIN}] ➔ 最新 [${GREEN}${latest_version}${PLAIN}]"
+        fi
+        download_url="${GH_MIRROR}https://github.com/${GITHUB_REPO}/releases/download/${latest_version}/realm-${REALM_ARCH}.tar.gz"
+    fi
     local tmp_dir
     tmp_dir=$(mktemp -d /tmp/realm_inst.XXXXXX)
     # shellcheck disable=SC2064
@@ -472,18 +484,31 @@ install_realm() {
 update_script() {
     check_root
     choose_mirror
-    info "正在从 GitHub 获取最新版 Realm Pro 管理脚本..."
+    info "正在检测 GitHub 远程最新版本..."
     local tmp_script
     tmp_script=$(mktemp /tmp/realm_script.XXXXXX)
     if curl -fsSL --connect-timeout 10 "${GH_MIRROR}${SCRIPT_RAW_URL}" -o "$tmp_script" 2>/dev/null || wget -q --timeout=10 -O "$tmp_script" "${GH_MIRROR}${SCRIPT_RAW_URL}" 2>/dev/null; then
         if grep -q "Realm" "$tmp_script" 2>/dev/null && grep -q "show_menu" "$tmp_script" 2>/dev/null; then
+            local remote_ver
+            remote_ver=$(grep -m1 '^SCRIPT_VERSION=' "$tmp_script" | cut -d'"' -f2)
+            if [[ -n "$remote_ver" && "$remote_ver" == "$SCRIPT_VERSION" ]]; then
+                success "当前管理脚本已是最新版本 (${GREEN}v${SCRIPT_VERSION}${PLAIN})，无需更新！"
+                read -rp "是否强制重新覆盖当前脚本？[y/N 默认 N]: " force_script
+                if [[ "$force_script" != [yY] && "$force_script" != [yY][eE][sS] ]]; then
+                    rm -f "$tmp_script"
+                    return 0
+                fi
+            else
+                info "发现新版本脚本: 当前 [${YELLOW}v${SCRIPT_VERSION}${PLAIN}] ➔ 最新 [${GREEN}v${remote_ver:-未知}${PLAIN}]"
+            fi
+
             install -m 755 "$tmp_script" "$SCRIPT_PATH"
             ln -sf "$SCRIPT_PATH" "$SHORT_SCRIPT_PATH" 2>/dev/null || true
             chmod +x "$SCRIPT_PATH" "$SHORT_SCRIPT_PATH" 2>/dev/null || true
             rm -f "$tmp_script"
             init_config_structure
             setup_service
-            success "Realm Pro 管理脚本已成功更新至最新版本！"
+            success "Realm Pro 管理脚本已成功升级至最新版 (v${remote_ver:-$SCRIPT_VERSION})！"
             echo ""
             read -rp "按回车键立即无缝载入新版控制面板..."
             exec "$SCRIPT_PATH"
