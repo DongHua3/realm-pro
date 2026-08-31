@@ -496,11 +496,17 @@ EOF
     migrate_legacy_config
 }
 
-migrate_legacy_config() {
-    local rule_count=0
+count_rules() {
     if [[ -d "$RULES_DIR" ]]; then
-        rule_count=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null | wc -l || echo "0")
+        find "$RULES_DIR" -maxdepth 1 -name "*.toml" 2>/dev/null | wc -l | tr -d '[:space:]'
+    else
+        echo "0"
     fi
+}
+
+migrate_legacy_config() {
+    local rule_count
+    rule_count=$(count_rules)
 
     # 如果 rules.d 为空，或存在未迁移的旧版 config.toml，则全面扫描历史文件进行恢复
     if [[ "$rule_count" -eq 0 ]] || [[ -f "$LEGACY_CONFIG" && ! -f "${CONF_DIR}/.migrated" ]]; then
@@ -1212,18 +1218,12 @@ get_status_info() {
     VER_TAG=$("$BIN_PATH" -v 2>/dev/null | awk '{print $2}')
     [[ -z "$VER_TAG" ]] && VER_TAG="已安装"
 
-    if [[ -d "$RULES_DIR" ]]; then
-        RULE_COUNT=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null | wc -l || echo "0")
-    else
-        RULE_COUNT="0"
-    fi
+    RULE_COUNT=$(count_rules)
 
     # 若检测到规则数为 0，尝试触发一次自动历史恢复
     if [[ "$RULE_COUNT" -eq 0 ]] && [[ -f "$BIN_PATH" ]]; then
         migrate_legacy_config >/dev/null 2>&1 || true
-        if [[ -d "$RULES_DIR" ]]; then
-            RULE_COUNT=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null | wc -l || echo "0")
-        fi
+        RULE_COUNT=$(count_rules)
     fi
 }
 
