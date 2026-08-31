@@ -174,8 +174,11 @@ clean_remote_host() {
     # 移除多余的尾部斜杠
     host=${host%%/*}
 
-    # 如果形如 1.2.3.4:443 或 domain.com:443 (非 IPv6)
-    if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]] || [[ "$host" =~ ^[a-zA-Z0-9.-]+:[0-9]+$ ]]; then
+    # 如果形如 [2001:db8::1]:443 (带方括号的 IPv6:端口)
+    if [[ "$host" =~ ^\[([a-fA-F0-9:]+)\]:[0-9]+$ ]]; then
+        host="${BASH_REMATCH[1]}"
+    # 如果形如 1.2.3.4:443 或 domain.com:443
+    elif [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]] || [[ "$host" =~ ^[a-zA-Z0-9.-]+:[0-9]+$ ]]; then
         host=$(echo "$host" | awk -F':' '{print $1}')
     fi
 
@@ -363,9 +366,16 @@ get_verified_digest() {
     local asset_name="realm-${REALM_ARCH}.tar.gz"
     # 直连官方 API 确保信任锚安全
     curl -fsSL --connect-timeout 10 "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${tag}" 2>/dev/null \
-        | grep -A 5 "\"name\": \"${asset_name}\"" \
-        | grep '"digest":' \
-        | sed -E 's/.*"digest": "sha256:([a-f0-9]+)".*/\1/' || true
+        | awk -v asset="${asset_name}" '
+            $0 ~ "\"name\":[[:space:]]*\"" asset "\"" { in_asset=1; next }
+            in_asset && $0 ~ /"digest":[[:space:]]*"sha256:[a-f0-9]+"/ {
+                sub(/.*"sha256:/, "");
+                sub(/".*/, "");
+                print $0;
+                exit;
+            }
+            in_asset && $0 ~ /"browser_download_url":/ { in_asset=0 }
+        ' || true
 }
 
 install_realm() {

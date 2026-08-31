@@ -91,6 +91,7 @@ test_clean_remote_host() {
     test_assert "带协议头的 HTTPS URL" "example.com" "$(clean_remote_host "https://example.com/api")"
     test_assert "误粘贴端口的 IPv4" "1.2.3.4" "$(clean_remote_host "1.2.3.4:443")"
     test_assert "误粘贴端口的域名" "hk.node.com" "$(clean_remote_host "hk.node.com:8080")"
+    test_assert "误粘贴端口的带括号 IPv6" "2001:db8::1" "$(clean_remote_host "[2001:db8::1]:443")"
     test_assert "带首尾空格的主机名" "test.org" "$(clean_remote_host "  test.org  ")"
 }
 
@@ -343,6 +344,22 @@ test_cli_add_rule_logic() {
     rm -rf "$test_conf_dir"
 }
 
+# 11. 测试官方 Release SHA-256 Digest 提取
+test_digest_extraction() {
+    echo -e "\n--- [测试模块 11] Release 资产 SHA-256 Digest 提取 ---"
+    load_func get_verified_digest
+    REALM_ARCH="x86_64-unknown-linux-gnu"
+    GITHUB_REPO="zhboner/realm"
+
+    local digest
+    digest=$(get_verified_digest "v2.9.6")
+    local is_valid_sha256=false
+    if [[ "$digest" =~ ^[a-f0-9]{64}$ ]]; then
+        is_valid_sha256=true
+    fi
+    test_assert "必须成功解析 64 位标准 SHA-256 Digest" "true" "$is_valid_sha256"
+}
+
 # 执行所有测试
 test_clean_remote_host
 test_format_ip
@@ -354,6 +371,7 @@ test_cli_routing
 test_systemd_unit_compliance
 test_rules_d_lifecycle
 test_cli_add_rule_logic
+test_digest_extraction
 
 echo -e "\n=========================================================="
 echo -e "测试完成！总计: $((PASS + FAIL)) | \033[0;32m通过: $PASS\033[0m | \033[0;31m失败: $FAIL\033[0m"
