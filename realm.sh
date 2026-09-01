@@ -35,7 +35,7 @@ SCRIPT_PATH="/usr/local/bin/realm"
 SHORT_SCRIPT_PATH="/usr/local/bin/re"
 
 # 脚本版本与官方源
-SCRIPT_VERSION="2.1.4"
+SCRIPT_VERSION="2.1.5"
 GITHUB_REPO="zhboner/realm"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh"
 
@@ -839,9 +839,9 @@ parse_single_rule_file() {
     [[ ! -f "$file" ]] && return
 
     local port listen remote proxy remark
-    listen=$(grep -E "^[[:space:]]*listen *=" "$file" | head -n 1 | sed -E 's/^[[:space:]]*listen[[:space:]]*=[[:space:]]*["\047]?([^"\047]+)["\047]?.*/\1/')
-    remote=$(grep -E "^[[:space:]]*remote *=" "$file" | head -n 1 | sed -E 's/^[[:space:]]*remote[[:space:]]*=[[:space:]]*["\047]?([^"\047]+)["\047]?.*/\1/')
-    remark=$(grep -E "^[[:space:]]*#[[:space:]]*remark *=" "$file" | head -n 1 | sed -E 's/^[[:space:]]*#[[:space:]]*remark[[:space:]]*=[[:space:]]*["\047]?([^"\047]+)["\047]?.*/\1/' || echo "-")
+    listen=$(grep -E "^listen *=" "$file" | head -n 1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    remote=$(grep -E "^remote *=" "$file" | head -n 1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
+    remark=$(grep -E "^#[[:space:]]*remark *=" "$file" | head -n 1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || echo "-")
     [[ -z "$remark" ]] && remark="-"
 
     # PROXY Protocol 检测 (必须嵌套在 network 内部)
@@ -855,7 +855,7 @@ parse_single_rule_file() {
         proxy="关闭"
     fi
 
-    port=$(echo "$listen" | awk -F':' '{print $NF}' | tr -d '][[:space:]"'\''')
+    port=$(echo "$listen" | awk -F':' '{print $NF}')
     echo "${port}|${listen}|${remote}|${proxy}|${remark}"
 }
 
