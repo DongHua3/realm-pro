@@ -35,7 +35,7 @@ SCRIPT_PATH="/usr/local/bin/realm"
 SHORT_SCRIPT_PATH="/usr/local/bin/re"
 
 # 脚本版本与官方源
-SCRIPT_VERSION="2.1.3"
+SCRIPT_VERSION="2.1.4"
 GITHUB_REPO="zhboner/realm"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh"
 
@@ -175,7 +175,7 @@ install_dependencies() {
 # 输入清洗与地址校验
 # ------------------------------------------------------------------------------
 
-# 清洗落地主机地址 (移除 http://, https://, 误粘的端口与空格换行)
+# 清洗落地主机地址 (移除 http://, https://, 误粘的端口与空格换行, 剥离多余方括号)
 clean_remote_host() {
     local host="$1"
     host=$(echo "$host" | tr -d "[:space:]\"'\r\n")
@@ -185,53 +185,66 @@ clean_remote_host() {
     # 移除多余的尾部斜杠
     host=${host%%/*}
 
-    # 如果形如 [2001:db8::1]:443 (带方括号的 IPv6:端口)
-    if [[ "$host" =~ ^\[([a-fA-F0-9:]+)\]:[0-9]+$ ]]; then
+    # 剥离带端口的情况: [2001:db8::1]:443 或 1.2.3.4:443 或 domain.com:443 或 [domain.com]:443
+    if [[ "$host" =~ ^\[(.*)\]:([0-9]+)$ ]]; then
         host="${BASH_REMATCH[1]}"
-    # 如果形如 1.2.3.4:443 或 domain.com:443
     elif [[ "$host" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):[0-9]+$ ]] || [[ "$host" =~ ^([a-zA-Z0-9.-]+):[0-9]+$ ]]; then
         host="${BASH_REMATCH[1]}"
+    fi
+
+    # 清理残留的尾部冒号 (如 3x.hans1.cc.cd:)
+    host=${host%:}
+
+    # 如果带有方括号但其实是域名的畸形情况 (如 [3x.hans1.cc.cd] 或 [3x.hans1.cc.cd:])，剥离方括号
+    if [[ "$host" =~ ^\[(.*)\]$ ]]; then
+        local inner="${BASH_REMATCH[1]}"
+        inner=${inner%:}
+        if [[ "$inner" =~ \. ]] || [[ ! "$inner" =~ ^[a-fA-F0-9:]+$ ]]; then
+            host="$inner"
+        fi
     fi
 
     echo "$host"
 }
 
-# 格式化 IP (自动识别 IPv6 并补充方括号)
+# 格式化 IP (严格识别合法 IPv6 并补充方括号，绝不误套域名)
 format_ip() {
     local ip="$1"
-    if [[ -z "$ip" ]]; then
-        echo ""
-        return
-    fi
-    # 移除首尾可能多余的空格
+    [[ -z "$ip" ]] && return
     ip=$(echo "$ip" | tr -d '[:space:]')
-    # 如果已经包含方括号，直接返回
-    if [[ "$ip" =~ ^\[.*\]$ ]]; then
+
+    # 若已包含方括号且是合法 IPv6，原样返回
+    if [[ "$ip" =~ ^\[[a-fA-F0-9:]+\]$ ]]; then
         echo "$ip"
         return
     fi
-    # 判断是否为 IPv6 地址 (包含冒号)
-    if [[ "$ip" =~ : ]]; then
+
+    # 严密判定：只有包含冒号、纯16进制字符、且不含点号(非域名)才视为 IPv6
+    if [[ "$ip" =~ : ]] && [[ "$ip" =~ ^[a-fA-F0-9:]+$ ]] && [[ ! "$ip" =~ \. ]]; then
         echo "[$ip]"
     else
         echo "$ip"
     fi
 }
 
-# 精准解析 remote 字符串 (返回 host 与 port)
+# 精准解析 remote 字符串 (返回 clean host 与 port)
 parse_remote_target() {
     local remote="$1"
     local r_host="" r_port=""
-    if [[ "$remote" =~ ^\[([a-fA-F0-9:]+)\]:([0-9]+)$ ]]; then
+    if [[ "$remote" =~ ^\[(.*)\]:([0-9]+)$ ]]; then
         r_host="${BASH_REMATCH[1]}"
         r_port="${BASH_REMATCH[2]}"
-    elif [[ "$remote" =~ ^(.*):([0-9]+)$ ]]; then
+    elif [[ "$remote" =~ ^\[(.*)\]$ ]]; then
+        r_host="${BASH_REMATCH[1]}"
+        r_port=""
+    elif [[ "$remote" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([0-9]+)$ ]] || [[ "$remote" =~ ^([a-zA-Z0-9.-]+):([0-9]+)$ ]]; then
         r_host="${BASH_REMATCH[1]}"
         r_port="${BASH_REMATCH[2]}"
     else
         r_host="$remote"
         r_port=""
     fi
+    r_host=$(clean_remote_host "$r_host")
     echo "${r_host}|${r_port}"
 }
 
@@ -543,7 +556,7 @@ update_script() {
             && grep -q "install_realm" "$tmp_script" 2>/dev/null \
             && grep -q "add_rule" "$tmp_script" 2>/dev/null; then
             local remote_ver
-            remote_ver=$(grep -m1 '^SCRIPT_VERSION=' "$tmp_script" | cut -d'"' -f2)
+            remote_ver=$(grep -m1 '^[[:space:]]*SCRIPT_VERSION=' "$tmp_script" | sed -E 's/^[[:space:]]*SCRIPT_VERSION=["'\''"]?([^"'\''"]+)["'\''"]?.*/\1/')
             if [[ -n "$remote_ver" && "$remote_ver" == "$SCRIPT_VERSION" ]]; then
                 success "当前管理脚本已是最新版本 (${GREEN}v${SCRIPT_VERSION}${PLAIN})，无需更新！"
                 read -rp "是否强制重新覆盖当前脚本？[y/N 默认 N]: " force_script
@@ -614,11 +627,8 @@ count_rules() {
 }
 
 migrate_legacy_config() {
-    local rule_count
-    rule_count=$(count_rules)
-
-    # 如果 rules.d 为空，或存在未迁移的旧版 config.toml，则全面扫描历史文件进行恢复 (严格排除 backup 目录与压缩包)
-    if [[ "$rule_count" -eq 0 ]] || [[ -f "$LEGACY_CONFIG" && ! -f "${CONF_DIR}/.migrated" ]]; then
+    # 仅在从未迁移过（.migrated 标记不存在）时自动扫描并迁移历史配置
+    if [[ ! -f "${CONF_DIR}/.migrated" ]]; then
         mkdir -p "${BACKUP_DIR}" "${RULES_DIR}"
 
         local candidate_files
@@ -628,7 +638,7 @@ migrate_legacy_config() {
             if grep -q -E "listen[[:space:]]*=" "$src_file" 2>/dev/null; then
                 info "检测到历史配置文件: ${src_file}，正在提取规则..."
 
-                # 极度健壮的规则提取器 (支持 [[endpoints]] 与 [[endpoint]]、任意缩进、引号、CRLF)
+                # 极度健壮的规则提取器 (支持 [[endpoints]] 与 [[endpoint]]、任意缩进、引号、CRLF、自动纠偏)
                 awk -v rdir="$RULES_DIR" '
                     BEGIN { in_ep=0; lport=""; has_proxy=0; pver=2; remark=""; listen_val=""; remote_val="" }
                     /^[[:space:]]*\[\[endpoints?\]\]/ {
@@ -665,6 +675,17 @@ migrate_legacy_config() {
                                 line=$0;
                                 gsub(/^[[:space:]]*remote[[:space:]]*=[[:space:]]*["\047]?/, "", line);
                                 gsub(/["\047].*$/, "", line);
+                                # 自动纠偏历史可能存在的畸形方括号域名 (如 [domain.com:]:8443 -> domain.com:8443)
+                                if (line ~ /^\[.*\]:[0-9]+$/) {
+                                    split(line, r_parts, "]:");
+                                    inner=r_parts[1];
+                                    sub(/^\[/, "", inner);
+                                    sub(/:$/, "", inner);
+                                    r_port=r_parts[2];
+                                    if (inner ~ /\./ || inner ~ /[^a-fA-F0-9:]/) {
+                                        line=inner ":" r_port;
+                                    }
+                                }
                                 remote_val=line;
                             }
                             if ($0 ~ /send_proxy[[:space:]]*=[[:space:]]*true/) has_proxy=1;
@@ -818,9 +839,9 @@ parse_single_rule_file() {
     [[ ! -f "$file" ]] && return
 
     local port listen remote proxy remark
-    listen=$(grep -E "^listen *=" "$file" | head -n 1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
-    remote=$(grep -E "^remote *=" "$file" | head -n 1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')
-    remark=$(grep -E "^#[[:space:]]*remark *=" "$file" | head -n 1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || echo "-")
+    listen=$(grep -E "^[[:space:]]*listen *=" "$file" | head -n 1 | sed -E 's/^[[:space:]]*listen[[:space:]]*=[[:space:]]*["\047]?([^"\047]+)["\047]?.*/\1/')
+    remote=$(grep -E "^[[:space:]]*remote *=" "$file" | head -n 1 | sed -E 's/^[[:space:]]*remote[[:space:]]*=[[:space:]]*["\047]?([^"\047]+)["\047]?.*/\1/')
+    remark=$(grep -E "^[[:space:]]*#[[:space:]]*remark *=" "$file" | head -n 1 | sed -E 's/^[[:space:]]*#[[:space:]]*remark[[:space:]]*=[[:space:]]*["\047]?([^"\047]+)["\047]?.*/\1/' || echo "-")
     [[ -z "$remark" ]] && remark="-"
 
     # PROXY Protocol 检测 (必须嵌套在 network 内部)
@@ -834,7 +855,7 @@ parse_single_rule_file() {
         proxy="关闭"
     fi
 
-    port=$(echo "$listen" | awk -F':' '{print $NF}')
+    port=$(echo "$listen" | awk -F':' '{print $NF}' | tr -d '][[:space:]"'\''')
     echo "${port}|${listen}|${remote}|${proxy}|${remark}"
 }
 
@@ -1421,12 +1442,6 @@ get_status_info() {
     [[ -z "$VER_TAG" ]] && VER_TAG="未安装"
 
     RULE_COUNT=$(count_rules)
-
-    # 若检测到规则数为 0，尝试触发一次自动历史恢复
-    if [[ "$RULE_COUNT" -eq 0 ]] && [[ -f "$BIN_PATH" ]]; then
-        migrate_legacy_config >/dev/null 2>&1 || true
-        RULE_COUNT=$(count_rules)
-    fi
 }
 
 show_menu() {
