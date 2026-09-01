@@ -4,7 +4,7 @@
 
 **基于 [zhboner/realm](https://github.com/zhboner/realm) 核心打造的专业级 Linux VPS 网络中转管理面板**
 
-[![Release](https://img.shields.io/badge/version-2.1.2-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
+[![Release](https://img.shields.io/badge/version-2.1.3-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine%20%7C%20Arch-orange.svg?style=flat-square)](#-系统与架构支持)
 [![Arch](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64%20%7C%20armv7-brightgreen.svg?style=flat-square)](#-系统与架构支持)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
@@ -30,10 +30,10 @@
 - 📋 **完整规则生命周期 (CRUD)**：
   - 结构化表格清晰罗列所有监听与转发节点。
   - 基于 `rules.d/` 原子化单文件架构，增删改查不污染其他规则，删除时同步移除防火墙放行规则。
-  - 自动备份配置文件并支持语法异常时一键回滚。
+  - 自动备份配置文件，规则增删改失败时自动回滚，配置异常可随时用备份恢复。
 - 🛡️ **全端口特权绑定与安全加固**：
   - 修复原版 Systemd 沙箱权限缺陷，正确赋予 `CAP_NET_BIND_SERVICE`，完美支持 **80 / 443 / 53** 等特权端口。
-  - 下载二进制直连官方 API 执行不可变 **SHA-256 完整性哈希校验**，杜绝第三方镜像投毒。
+  - 下载二进制直连官方 API 执行 **SHA-256 完整性哈希校验**，无法获取官方哈希时强制中止安装，防范第三方镜像投毒。
   - 自动适配 SELinux 安全上下文（支持 CentOS / Rocky / Fedora）。
 - 🌐 **双栈与协议增强**：
   - 智能识别与清洗 IPv4 / IPv6，自动格式化补齐 `[...]` 方括号。
@@ -61,6 +61,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DongHua3/realm-pro/main/real
 > ```bash
 > bash <(curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh)
 > ```
+>
+> **提示（Alpine Linux）**：Alpine 默认不带 bash，请先执行 `apk add bash curl` 再运行上方一键安装命令。
 
 ### 2. 唤出管理菜单
 
@@ -78,7 +80,7 @@ re
 ╔═══════════════════════════════════════════════════════════╗
 ║         Realm 高性能网络中转管理面板 (Pro 增强版)         ║
 ╚═══════════════════════════════════════════════════════════╝
- 状态: 运行中 | 自启: 已启用 | 脚本: v2.1.2 | 核心: v2.9.6 | 规则数: 3
+ 状态: 运行中 | 自启: 已启用 | 脚本: v2.1.3 | 核心: v2.9.6 | 规则数: 3
 -------------------------------------------------------------
  1. 添加转发规则 (端口/IPv4/IPv6/PROXY协议)
  2. 查看所有转发规则

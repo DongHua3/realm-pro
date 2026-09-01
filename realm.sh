@@ -35,7 +35,7 @@ SCRIPT_PATH="/usr/local/bin/realm"
 SHORT_SCRIPT_PATH="/usr/local/bin/re"
 
 # 脚本版本与官方源
-SCRIPT_VERSION="2.1.2"
+SCRIPT_VERSION="2.1.3"
 GITHUB_REPO="zhboner/realm"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh"
 
@@ -158,6 +158,17 @@ install_dependencies() {
     elif command -v pacman >/dev/null 2>&1; then
         pacman -Sy --noconfirm --needed curl wget tar gzip iproute2 iptables >/dev/null 2>&1 || true
     fi
+
+    # 关键依赖可用性自检 (避免静默失败导致后续安装莫名报错)
+    local missing_deps=""
+    for dep in curl wget tar; do
+        command -v "$dep" >/dev/null 2>&1 || missing_deps="${missing_deps} ${dep}"
+    done
+    if [[ -n "$missing_deps" ]]; then
+        error "关键依赖安装失败或不可用:${missing_deps}"
+        error "请手动执行安装: ${PKG_CMD} curl wget tar，然后重新运行本脚本"
+        exit 1
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -251,17 +262,17 @@ is_port_in_use() {
 # 校验 TOML 语法 (若 Python 可用则通过 tomllib/tomli/toml 预检)
 validate_toml() {
     local file="$1"
-    local py_cmd=""
+    local py_code=""
     if python3 -c "import tomllib" >/dev/null 2>&1; then
-        py_cmd="python3 -c \"import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))\""
+        py_code="import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))"
     elif python3 -c "import tomli" >/dev/null 2>&1; then
-        py_cmd="python3 -c \"import sys, tomli; tomli.load(open(sys.argv[1], 'rb'))\""
+        py_code="import sys, tomli; tomli.load(open(sys.argv[1], 'rb'))"
     elif python3 -c "import toml" >/dev/null 2>&1; then
-        py_cmd="python3 -c \"import sys, toml; toml.load(sys.argv[1])\""
+        py_code="import sys, toml; toml.load(sys.argv[1])"
     fi
 
-    if [[ -n "$py_cmd" ]]; then
-        eval "$py_cmd \"$file\"" >/dev/null 2>&1
+    if [[ -n "$py_code" ]]; then
+        python3 -c "$py_code" "$file" >/dev/null 2>&1
         return $?
     fi
     return 0
@@ -425,6 +436,12 @@ install_realm() {
     local download_url
     if [[ -z "$latest_version" ]]; then
         warn "获取最新版本号失败，将拉取最新稳定资产..."
+        error "警告: 无法获取官方版本元数据，本次下载将无法执行 SHA-256 完整性校验！"
+        read -rp "是否仍然继续下载安装？[y/N 默认 N]: " no_verify
+        if [[ "$no_verify" != [yY] && "$no_verify" != [yY][eE][sS] ]]; then
+            info "已取消安装。请检查网络后重试，或更换下载镜像源。"
+            return 1
+        fi
         download_url="${GH_MIRROR}https://github.com/${GITHUB_REPO}/releases/latest/download/realm-${REALM_ARCH}.tar.gz"
     else
         local clean_latest="${latest_version#v}"
@@ -466,7 +483,9 @@ install_realm() {
             fi
             success "SHA-256 完整性校验通过！"
         else
-            warn "未能获取官方 API 校验哈希（可能触发 GitHub 限流），已跳过哈希校验。"
+            error "FATAL: 无法从官方 API 获取校验哈希（可能触发 GitHub 限流），为安全起见已中止安装。"
+            error "请稍后重试，或更换下载镜像源。"
+            return 1
         fi
     fi
 
@@ -519,7 +538,10 @@ update_script() {
     local tmp_script
     tmp_script=$(mktemp /tmp/realm_script.XXXXXX)
     if curl -fsSL --connect-timeout 10 "${GH_MIRROR}${SCRIPT_RAW_URL}?t=$(date +%s)" -o "$tmp_script" 2>/dev/null || wget -q --timeout=10 -O "$tmp_script" "${GH_MIRROR}${SCRIPT_RAW_URL}?t=$(date +%s)" 2>/dev/null; then
-        if grep -q "Realm" "$tmp_script" 2>/dev/null && grep -q "show_menu" "$tmp_script" 2>/dev/null; then
+        if grep -qE "^[[:space:]]*SCRIPT_VERSION=['\"]?[0-9]+\.[0-9]+\.[0-9]+" "$tmp_script" 2>/dev/null \
+            && grep -q "show_menu" "$tmp_script" 2>/dev/null \
+            && grep -q "install_realm" "$tmp_script" 2>/dev/null \
+            && grep -q "add_rule" "$tmp_script" 2>/dev/null; then
             local remote_ver
             remote_ver=$(grep -m1 '^SCRIPT_VERSION=' "$tmp_script" | cut -d'"' -f2)
             if [[ -n "$remote_ver" && "$remote_ver" == "$SCRIPT_VERSION" ]]; then
@@ -632,8 +654,8 @@ migrate_legacy_config() {
                             }
                             if ($0 ~ /^[[:space:]]*listen[[:space:]]*=/) {
                                 line=$0;
-                                gsub(/^[[:space:]]*listen[[:space:]]*=[[:space:]]*["\x27]?/, "", line);
-                                gsub(/["\x27].*$/, "", line);
+                                gsub(/^[[:space:]]*listen[[:space:]]*=[[:space:]]*["\047]?/, "", line);
+                                gsub(/["\047].*$/, "", line);
                                 listen_val=line;
                                 split(listen_val, arr, ":");
                                 gsub(/[^0-9]/, "", arr[length(arr)]);
@@ -641,8 +663,8 @@ migrate_legacy_config() {
                             }
                             if ($0 ~ /^[[:space:]]*remote[[:space:]]*=/) {
                                 line=$0;
-                                gsub(/^[[:space:]]*remote[[:space:]]*=[[:space:]]*["\x27]?/, "", line);
-                                gsub(/["\x27].*$/, "", line);
+                                gsub(/^[[:space:]]*remote[[:space:]]*=[[:space:]]*["\047]?/, "", line);
+                                gsub(/["\047].*$/, "", line);
                                 remote_val=line;
                             }
                             if ($0 ~ /send_proxy[[:space:]]*=[[:space:]]*true/) has_proxy=1;
@@ -701,6 +723,8 @@ RestartSec=3s
 LimitNOFILE=1048576
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
 StandardOutput=journal
 StandardError=journal
 
@@ -733,6 +757,7 @@ EOF
 
 uninstall_realm() {
     check_root
+    check_sys
     echo -e "${RED}${BOLD}警告: 即将卸载 Realm 转发服务！${PLAIN}"
     read -rp "是否保留配置文件及规则备份？(Y/n): " keep_conf
     keep_conf=${keep_conf:-y}
@@ -1155,7 +1180,11 @@ edit_raw_config() {
     read -rp "按回车键继续..."
     backup_rules
     "$editor" "$GLOBAL_CONF"
-    restart_service
+    if ! restart_service; then
+        error "服务启动失败！改动前的配置已自动备份至: ${BACKUP_DIR}"
+        echo -e "  如需还原，请执行: ${BOLD}tar -xzf \$(ls -1t ${BACKUP_DIR}/realm_rules_*.tar.gz | head -n1) -C ${CONF_DIR}${PLAIN}"
+        echo -e "  还原后重启服务: ${BOLD}re restart${PLAIN}"
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -1260,31 +1289,29 @@ run_doctor() {
         for rf in $rule_files; do
             idx=$((idx + 1))
             (
-                local rule_info
                 rule_info=$(parse_single_rule_file "$rf")
                 IFS="|" read -r port listen remote proxy remark <<< "$rule_info"
 
-                local parse_res
                 parse_res=$(parse_remote_target "$remote")
                 IFS="|" read -r r_host r_port <<< "$parse_res"
                 r_host=$(echo "$r_host" | sed 's/\[//;s/\]//')
 
                 # 监听状态检测
-                local listen_stat="${RED}未监听${PLAIN}"
+                listen_stat="${RED}未监听${PLAIN}"
                 if is_port_in_use "$port"; then
                     listen_stat="${GREEN}监听中${PLAIN}"
                 fi
 
                 # 落地端 TCP 握手并发探测 (限时 1.5s)
-                local r_stat="${RED}连接失败${PLAIN}"
-                if python3 -c "import socket; s = socket.create_connection(('${r_host}', int('${r_port}')), timeout=1.5); s.close()" >/dev/null 2>&1; then
+                r_stat="${RED}连接失败${PLAIN}"
+                if python3 -c "import sys, socket; s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=1.5); s.close()" "$r_host" "$r_port" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 elif command -v nc >/dev/null 2>&1 && timeout 1.5 nc -w 1 -z "$r_host" "$r_port" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 elif [[ ! "$r_host" =~ : ]] && timeout 1.5 bash -c "exec 3<>/dev/tcp/${r_host}/${r_port}" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 elif command -v curl >/dev/null 2>&1; then
-                    local curl_target="$r_host"
+                    curl_target="$r_host"
                     [[ "$curl_target" =~ : ]] && curl_target="[${curl_target}]"
                     if curl -s --connect-timeout 1.5 "telnet://${curl_target}:${r_port}" 2>&1 | grep -E -q "Connected"; then
                         r_stat="${GREEN}TCP连通${PLAIN}"
@@ -1332,7 +1359,7 @@ network_diagnostic() {
 
     info "正在探测与目标 ${test_target}:${test_port} 的网络连通性..."
     local ok=false
-    if python3 -c "import socket; s = socket.create_connection(('${test_target}', int('${test_port}')), timeout=3.0); s.close()" >/dev/null 2>&1; then
+    if python3 -c "import sys, socket; s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=3.0); s.close()" "$test_target" "$test_port" >/dev/null 2>&1; then
         ok=true
     elif command -v nc >/dev/null 2>&1; then
         if nc -w 3 -z "$test_target" "$test_port" 2>/dev/null || nc -z -v -w 3 "$test_target" "$test_port" 2>/dev/null; then
