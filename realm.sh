@@ -164,10 +164,10 @@ install_dependencies() {
 # 输入清洗与地址校验
 # ------------------------------------------------------------------------------
 
-# 清洗落地主机地址 (移除 http://, https://, 误粘的端口与空格)
+# 清洗落地主机地址 (移除 http://, https://, 误粘的端口与空格换行)
 clean_remote_host() {
     local host="$1"
-    host=$(echo "$host" | tr -d '[:space:]')
+    host=$(echo "$host" | tr -d "[:space:]\"'\r\n")
     # 移除协议头
     host=${host#http://}
     host=${host#https://}
@@ -178,8 +178,8 @@ clean_remote_host() {
     if [[ "$host" =~ ^\[([a-fA-F0-9:]+)\]:[0-9]+$ ]]; then
         host="${BASH_REMATCH[1]}"
     # 如果形如 1.2.3.4:443 或 domain.com:443
-    elif [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$ ]] || [[ "$host" =~ ^[a-zA-Z0-9.-]+:[0-9]+$ ]]; then
-        host=$(echo "$host" | awk -F':' '{print $1}')
+    elif [[ "$host" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):[0-9]+$ ]] || [[ "$host" =~ ^([a-zA-Z0-9.-]+):[0-9]+$ ]]; then
+        host="${BASH_REMATCH[1]}"
     fi
 
     echo "$host"
@@ -192,6 +192,8 @@ format_ip() {
         echo ""
         return
     fi
+    # 移除首尾可能多余的空格
+    ip=$(echo "$ip" | tr -d '[:space:]')
     # 如果已经包含方括号，直接返回
     if [[ "$ip" =~ ^\[.*\]$ ]]; then
         echo "$ip"
@@ -203,6 +205,23 @@ format_ip() {
     else
         echo "$ip"
     fi
+}
+
+# 精准解析 remote 字符串 (返回 host 与 port)
+parse_remote_target() {
+    local remote="$1"
+    local r_host="" r_port=""
+    if [[ "$remote" =~ ^\[([a-fA-F0-9:]+)\]:([0-9]+)$ ]]; then
+        r_host="${BASH_REMATCH[1]}"
+        r_port="${BASH_REMATCH[2]}"
+    elif [[ "$remote" =~ ^(.*):([0-9]+)$ ]]; then
+        r_host="${BASH_REMATCH[1]}"
+        r_port="${BASH_REMATCH[2]}"
+    else
+        r_host="$remote"
+        r_port=""
+    fi
+    echo "${r_host}|${r_port}"
 }
 
 # 校验端口合法性 (1-65535)
@@ -229,18 +248,20 @@ is_port_in_use() {
     fi
 }
 
-# 校验 TOML 语法 (若 Python 可用则通过 tomllib 预检)
+# 校验 TOML 语法 (若 Python 可用则通过 tomllib/tomli/toml 预检)
 validate_toml() {
     local file="$1"
     local py_cmd=""
     if python3 -c "import tomllib" >/dev/null 2>&1; then
-        py_cmd="python3"
-    elif python -c "import tomllib" >/dev/null 2>&1; then
-        py_cmd="python"
+        py_cmd="python3 -c \"import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))\""
+    elif python3 -c "import tomli" >/dev/null 2>&1; then
+        py_cmd="python3 -c \"import sys, tomli; tomli.load(open(sys.argv[1], 'rb'))\""
+    elif python3 -c "import toml" >/dev/null 2>&1; then
+        py_cmd="python3 -c \"import sys, toml; toml.load(sys.argv[1])\""
     fi
 
     if [[ -n "$py_cmd" ]]; then
-        $py_cmd -c "import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))" "$file" 2>/dev/null
+        eval "$py_cmd \"$file\"" >/dev/null 2>&1
         return $?
     fi
     return 0
@@ -285,11 +306,17 @@ firewall_allow() {
 
         if [[ "$proto" == "tcp" || "$proto" == "both" ]]; then
             # shellcheck disable=SC2086
-            iptables -I INPUT $src_opt -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            iptables -C INPUT $src_opt -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT $src_opt -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            if command -v ip6tables >/dev/null 2>&1; then
+                ip6tables -C INPUT $src_opt -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 || ip6tables -I INPUT $src_opt -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            fi
         fi
         if [[ "$proto" == "udp" || "$proto" == "both" ]]; then
             # shellcheck disable=SC2086
-            iptables -I INPUT $src_opt -p udp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            iptables -C INPUT $src_opt -p udp --dport "$port" -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT $src_opt -p udp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            if command -v ip6tables >/dev/null 2>&1; then
+                ip6tables -C INPUT $src_opt -p udp --dport "$port" -j ACCEPT >/dev/null 2>&1 || ip6tables -I INPUT $src_opt -p udp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            fi
         fi
         # 持久化保存
         if command -v netfilter-persistent >/dev/null 2>&1; then
@@ -324,9 +351,11 @@ firewall_deny() {
     elif command -v iptables >/dev/null 2>&1; then
         if [[ "$proto" == "tcp" || "$proto" == "both" ]]; then
             iptables -D INPUT -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            command -v ip6tables >/dev/null 2>&1 && ip6tables -D INPUT -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
         fi
         if [[ "$proto" == "udp" || "$proto" == "both" ]]; then
             iptables -D INPUT -p udp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
+            command -v ip6tables >/dev/null 2>&1 && ip6tables -D INPUT -p udp --dport "$port" -j ACCEPT >/dev/null 2>&1 || true
         fi
         if command -v netfilter-persistent >/dev/null 2>&1; then
             netfilter-persistent save >/dev/null 2>&1 || true
@@ -436,6 +465,8 @@ install_realm() {
                 return 1
             fi
             success "SHA-256 完整性校验通过！"
+        else
+            warn "未能获取官方 API 校验哈希（可能触发 GitHub 限流），已跳过哈希校验。"
         fi
     fi
 
@@ -518,7 +549,6 @@ update_script() {
     error "获取最新脚本失败，请检查网络连接或切换镜像源！"
 }
 
-
 init_config_structure() {
     mkdir -p "$CONF_DIR" "$RULES_DIR" "$BACKUP_DIR" "$LOG_DIR"
     chmod 700 "$CONF_DIR" "$BACKUP_DIR"
@@ -565,13 +595,12 @@ migrate_legacy_config() {
     local rule_count
     rule_count=$(count_rules)
 
-    # 如果 rules.d 为空，或存在未迁移的旧版 config.toml，则全面扫描历史文件进行恢复
+    # 如果 rules.d 为空，或存在未迁移的旧版 config.toml，则全面扫描历史文件进行恢复 (严格排除 backup 目录与压缩包)
     if [[ "$rule_count" -eq 0 ]] || [[ -f "$LEGACY_CONFIG" && ! -f "${CONF_DIR}/.migrated" ]]; then
         mkdir -p "${BACKUP_DIR}" "${RULES_DIR}"
 
-        # 扫描 /etc/realm 及其子目录下所有包含 listen 关键字的历史文件 (排除 rules.d/ 与 00-global.toml)
         local candidate_files
-        candidate_files=$(find "$CONF_DIR" -maxdepth 2 -type f ! -path "*/rules.d/*" ! -name "00-global.toml" ! -name ".migrated" 2>/dev/null || true)
+        candidate_files=$(find "$CONF_DIR" -maxdepth 2 -type f ! -path "*/rules.d/*" ! -path "*/backup/*" ! -name "*.tar.gz" ! -name "*.bak" ! -name "00-global.toml" ! -name ".migrated" 2>/dev/null || true)
 
         for src_file in $candidate_files; do
             if grep -q -E "listen[[:space:]]*=" "$src_file" 2>/dev/null; then
@@ -681,7 +710,7 @@ EOF
         systemctl daemon-reload
         systemctl enable realm >/dev/null 2>&1 || true
     else
-        # OpenRC (Alpine Linux) 启动脚本
+        # OpenRC (Alpine Linux) 启动脚本 (配置标准与错误日志重定向)
         cat > "$OPENRC_SERVICE" <<'EOF'
 #!/sbin/openrc-run
 description="Realm High-Performance Relay Server"
@@ -689,6 +718,8 @@ command="/usr/local/bin/realm-bin"
 command_args="-c /etc/realm"
 command_background="yes"
 pidfile="/run/realm.pid"
+output_log="/var/log/realm/realm.log"
+error_log="/var/log/realm/realm.log"
 
 depend() {
     need net
@@ -782,6 +813,37 @@ parse_single_rule_file() {
     echo "${port}|${listen}|${remote}|${proxy}|${remark}"
 }
 
+# 根据输入的【端口号】或【序号 ID】解析出目标端口
+resolve_target_port() {
+    local input="$1"
+    [[ -z "$input" || "$input" == "0" ]] && return 1
+
+    # 如果直接匹配已有规则端口文件
+    if [[ -f "${RULES_DIR}/${input}.toml" ]]; then
+        echo "$input"
+        return 0
+    fi
+
+    # 如果输入的是数字序号 (ID)
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        local rule_files=()
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && rule_files+=("$f")
+        done < <(ls -1 "$RULES_DIR"/*.toml 2>/dev/null || true)
+
+        local idx=$((input - 1))
+        if [[ $idx -ge 0 && $idx -lt ${#rule_files[@]} ]]; then
+            local target_f="${rule_files[$idx]}"
+            local p
+            p=$(basename "$target_f" .toml)
+            echo "$p"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 list_rules() {
     echo -e "\n${BOLD}${CYAN}========== 当前 Realm 转发规则列表 ==========${PLAIN}"
     mkdir -p "$RULES_DIR"
@@ -829,13 +891,21 @@ add_rule() {
         case "$1" in
             -l|--listen) l_port="$2"; shift 2 ;;
             -r|--remote)
-                if [[ "$2" =~ : ]]; then
-                    r_host=$(clean_remote_host "$2")
-                    r_port=$(echo "$2" | awk -F':' '{print $NF}')
+                if [[ "$2" =~ ^\[(.*)\]:([0-9]+)$ ]]; then
+                    r_host="${BASH_REMATCH[1]}"
+                    r_port="${BASH_REMATCH[2]}"
+                elif [[ "$2" =~ ^(.*):([0-9]+)$ ]]; then
+                    r_host="${BASH_REMATCH[1]}"
+                    r_port="${BASH_REMATCH[2]}"
                 else
-                    r_host=$(clean_remote_host "$2")
-                    r_port="$3"; shift
+                    r_host="$2"
+                    if [[ -n "$3" && "$3" =~ ^[0-9]+$ ]]; then
+                        r_port="$3"
+                        shift
+                    fi
                 fi
+                r_host=$(clean_remote_host "$r_host")
+                r_host=$(format_ip "$r_host")
                 shift 2 ;;
             -p|--proxy)  proxy_ver="$2"; shift 2 ;;
             -m|--remark) remark="$2"; shift 2 ;;
@@ -916,7 +986,7 @@ add_rule() {
 
         # 6. 备注
         read -rp "请输入规则备注说明 (可选，回车跳过): " remark
-        remark=$(echo "$remark" | tr -d '"|\\')
+        remark=$(echo "$remark" | tr -d '"|\\\r\n')
         remark=${remark:-"-"}
     fi
 
@@ -965,27 +1035,36 @@ add_rule() {
 
 edit_rule() {
     check_root
-    list_rules
+    local target_input="$1"
     local rule_files
     rule_files=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null || true)
-    [[ -z "$rule_files" ]] && return
+    [[ -z "$rule_files" ]] && { info "当前暂无任何转发规则。"; return; }
 
-    read -rp "请输入要修改的规则【端口号】(输入 0 取消): " target_port
-    [[ "$target_port" == "0" || -z "$target_port" ]] && return
+    if [[ -z "$target_input" ]]; then
+        list_rules
+        read -rp "请输入要修改的规则【端口号】或【序号ID】(输入 0 取消): " target_input
+    fi
+    [[ "$target_input" == "0" || -z "$target_input" ]] && return
+
+    local target_port
+    if ! target_port=$(resolve_target_port "$target_input"); then
+        error "未找到匹配端口或序号为 [$target_input] 的规则！"
+        return 1
+    fi
 
     local target_file="${RULES_DIR}/${target_port}.toml"
     if [[ ! -f "$target_file" ]]; then
         error "未找到端口为 $target_port 的规则文件！"
-        return
+        return 1
     fi
 
     local rule_info
     rule_info=$(parse_single_rule_file "$target_file")
     IFS="|" read -r port listen remote proxy remark <<< "$rule_info"
 
-    local cur_r_host cur_r_port
-    cur_r_host=$(echo "$remote" | awk -F':' 'NF>1{print $1}')
-    cur_r_port=$(echo "$remote" | awk -F':' '{print $NF}')
+    local parse_res
+    parse_res=$(parse_remote_target "$remote")
+    IFS="|" read -r cur_r_host cur_r_port <<< "$parse_res"
 
     echo -e "\n${BOLD}${CYAN}正在修改端口 [${target_port}] 的规则 (直接回车保留原值):${PLAIN}"
     read -rp "新的落地目标 IP/域名 [当前: ${cur_r_host}]: " new_r_host
@@ -995,10 +1074,14 @@ edit_rule() {
 
     read -rp "新的落地目标端口 [当前: ${cur_r_port}]: " new_r_port
     new_r_port=${new_r_port:-$cur_r_port}
+    if ! validate_port "$new_r_port"; then
+        error "端口输入不合法，必须是 1 到 65535 之间的数字！"
+        return 1
+    fi
 
     read -rp "新的备注说明 [当前: ${remark}]: " new_remark
     new_remark=${new_remark:-$remark}
-    new_remark=$(echo "$new_remark" | tr -d '"|\\')
+    new_remark=$(echo "$new_remark" | tr -d '"|\\\r\n')
 
     backup_rules
     {
@@ -1028,18 +1111,27 @@ edit_rule() {
 
 delete_rule() {
     check_root
-    list_rules
+    local target_input="$1"
     local rule_files
     rule_files=$(ls -1 "$RULES_DIR"/*.toml 2>/dev/null || true)
-    [[ -z "$rule_files" ]] && return
+    [[ -z "$rule_files" ]] && { info "当前暂无任何转发规则。"; return; }
 
-    read -rp "请输入要删除的规则【端口号】(输入 0 取消): " del_port
-    [[ "$del_port" == "0" || -z "$del_port" ]] && return
+    if [[ -z "$target_input" ]]; then
+        list_rules
+        read -rp "请输入要删除的规则【端口号】或【序号ID】(输入 0 取消): " target_input
+    fi
+    [[ "$target_input" == "0" || -z "$target_input" ]] && return
+
+    local del_port
+    if ! del_port=$(resolve_target_port "$target_input"); then
+        error "未找到匹配端口或序号为 [$target_input] 的规则！"
+        return 1
+    fi
 
     local target_file="${RULES_DIR}/${del_port}.toml"
     if [[ ! -f "$target_file" ]]; then
         error "未找到端口为 $del_port 的规则文件！"
-        return
+        return 1
     fi
 
     backup_rules
@@ -1109,6 +1201,7 @@ restart_service() {
 
 view_logs() {
     echo -e "\n${CYAN}========== 实时运行日志 (按 Ctrl+C 退出) ==========${PLAIN}"
+    check_sys
     if [[ "$INIT_SYS" == "systemd" ]]; then
         journalctl -u realm -f -n 50
     else
@@ -1171,9 +1264,10 @@ run_doctor() {
                 rule_info=$(parse_single_rule_file "$rf")
                 IFS="|" read -r port listen remote proxy remark <<< "$rule_info"
 
-                local r_host r_port
-                r_host=$(echo "$remote" | awk -F':' 'NF>1{print $1}' | sed 's/\[//;s/\]//')
-                r_port=$(echo "$remote" | awk -F':' '{print $NF}')
+                local parse_res
+                parse_res=$(parse_remote_target "$remote")
+                IFS="|" read -r r_host r_port <<< "$parse_res"
+                r_host=$(echo "$r_host" | sed 's/\[//;s/\]//')
 
                 # 监听状态检测
                 local listen_stat="${RED}未监听${PLAIN}"
@@ -1183,14 +1277,16 @@ run_doctor() {
 
                 # 落地端 TCP 握手并发探测 (限时 1.5s)
                 local r_stat="${RED}连接失败${PLAIN}"
-                if timeout 1.5 bash -c "exec 3<>/dev/tcp/${r_host}/${r_port}" >/dev/null 2>&1; then
+                if python3 -c "import socket; s = socket.create_connection(('${r_host}', int('${r_port}')), timeout=1.5); s.close()" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 elif command -v nc >/dev/null 2>&1 && timeout 1.5 nc -w 1 -z "$r_host" "$r_port" >/dev/null 2>&1; then
+                    r_stat="${GREEN}TCP连通${PLAIN}"
+                elif [[ ! "$r_host" =~ : ]] && timeout 1.5 bash -c "exec 3<>/dev/tcp/${r_host}/${r_port}" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 elif command -v curl >/dev/null 2>&1; then
                     local curl_target="$r_host"
                     [[ "$curl_target" =~ : ]] && curl_target="[${curl_target}]"
-                    if curl -s --connect-timeout 1.5 "telnet://${curl_target}:${r_port}" 2>&1 | grep -E -q "Connected|refused"; then
+                    if curl -s --connect-timeout 1.5 "telnet://${curl_target}:${r_port}" 2>&1 | grep -E -q "Connected"; then
                         r_stat="${GREEN}TCP连通${PLAIN}"
                     fi
                 fi
@@ -1205,6 +1301,7 @@ run_doctor() {
         done
         rm -rf "$tmp_doc_dir"
     fi
+
     # 3. 防火墙状态检测
     echo -e "\n${BOLD}[3/4] 防火墙环境审计${PLAIN}"
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -qw "active"; then
@@ -1235,10 +1332,14 @@ network_diagnostic() {
 
     info "正在探测与目标 ${test_target}:${test_port} 的网络连通性..."
     local ok=false
-    if command -v nc >/dev/null 2>&1; then
+    if python3 -c "import socket; s = socket.create_connection(('${test_target}', int('${test_port}')), timeout=3.0); s.close()" >/dev/null 2>&1; then
+        ok=true
+    elif command -v nc >/dev/null 2>&1; then
         if nc -w 3 -z "$test_target" "$test_port" 2>/dev/null || nc -z -v -w 3 "$test_target" "$test_port" 2>/dev/null; then
             ok=true
         fi
+    elif [[ ! "$test_target" =~ : ]] && timeout 3 bash -c "exec 3<>/dev/tcp/${test_target}/${test_port}" >/dev/null 2>&1; then
+        ok=true
     elif command -v curl >/dev/null 2>&1; then
         local curl_target="$test_target"
         [[ "$curl_target" =~ : ]] && curl_target="[${curl_target}]"
@@ -1388,18 +1489,20 @@ case "$1" in
         ;;
     start)
         check_root
-        if [[ -f /etc/alpine-release ]]; then
-            rc-service realm start && success "Realm 已启动"
-        else
+        check_sys
+        if [[ "$INIT_SYS" == "systemd" ]]; then
             systemctl start realm && success "Realm 已启动"
+        else
+            rc-service realm start && success "Realm 已启动"
         fi
         ;;
     stop)
         check_root
-        if [[ -f /etc/alpine-release ]]; then
-            rc-service realm stop && warn "Realm 已停止"
-        else
+        check_sys
+        if [[ "$INIT_SYS" == "systemd" ]]; then
             systemctl stop realm && warn "Realm 已停止"
+        else
+            rc-service realm stop && warn "Realm 已停止"
         fi
         ;;
     restart)
@@ -1407,10 +1510,11 @@ case "$1" in
         restart_service
         ;;
     status)
-        if [[ -f /etc/alpine-release ]]; then
-            rc-service realm status
-        else
+        check_sys
+        if [[ "$INIT_SYS" == "systemd" ]]; then
             systemctl status realm
+        else
+            rc-service realm status
         fi
         ;;
     list|ls)
@@ -1421,10 +1525,12 @@ case "$1" in
         add_rule "$@"
         ;;
     edit)
-        edit_rule
+        shift
+        edit_rule "$@"
         ;;
     del|rm)
-        delete_rule
+        shift
+        delete_rule "$@"
         ;;
     log|logs)
         view_logs
@@ -1455,8 +1561,8 @@ case "$1" in
         echo "  re                打开交互式管理面板"
         echo "  re list / ls      查看当前所有中转规则"
         echo "  re add            添加中转规则 (支持参数: -l <本地端口> -r <落地地址:端口> -p <1|2> -m <备注>)"
-        echo "  re edit           修改已有中转规则"
-        echo "  re del / rm       删除指定中转规则"
+        echo "  re edit [端口|ID] 修改已有中转规则"
+        echo "  re del [端口|ID]  删除指定中转规则"
         echo "  re doctor         执行综合系统与链路体检"
         echo "  re status         查看 Realm 服务状态"
         echo "  re start          启动服务"
@@ -1464,6 +1570,7 @@ case "$1" in
         echo "  re restart        重启服务并重载配置"
         echo "  re log / logs     查看实时运行日志"
         echo "  re update         更新 Realm 核心程序"
+        echo "  re update-script  更新管理脚本 (self-update)"
         echo "  re backup         手动备份当前规则库"
         echo "  re uninstall      卸载 Realm 服务"
         echo "  re version / -v   查看版本信息"

@@ -1,0 +1,5 @@
+# Enforce LF for shell scripts and documentation
+* text=auto eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+LICENSE text eol=lf
