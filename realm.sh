@@ -35,7 +35,7 @@ SCRIPT_PATH="/usr/local/bin/realm"
 SHORT_SCRIPT_PATH="/usr/local/bin/re"
 
 # 脚本版本与官方源
-SCRIPT_VERSION="2.1.5"
+SCRIPT_VERSION="2.1.6"
 GITHUB_REPO="zhboner/realm"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh"
 
@@ -472,7 +472,7 @@ install_realm() {
     local tmp_dir
     tmp_dir=$(mktemp -d /tmp/realm_inst.XXXXXX)
     # shellcheck disable=SC2064
-    trap "rm -rf '$tmp_dir'" EXIT
+    trap "rm -rf '$tmp_dir'" EXIT RETURN
 
     info "正在下载: $download_url"
     if ! wget --timeout=30 --tries=2 -O "${tmp_dir}/realm.tar.gz" "$download_url"; then
@@ -1305,6 +1305,8 @@ run_doctor() {
     else
         local tmp_doc_dir
         tmp_doc_dir=$(mktemp -d /tmp/realm_doc.XXXXXX)
+        # shellcheck disable=SC2064
+        trap "rm -rf '$tmp_doc_dir'" EXIT RETURN
         local idx=0
 
         for rf in $rule_files; do
@@ -1341,6 +1343,10 @@ run_doctor() {
 
                 echo -e "  - 端口 [${BOLD}${YELLOW}${port}${PLAIN}] ➔ ${remote} (${remark})\n    本地: ${listen_stat} | 落地网络: ${r_stat} | PROXY协议: ${proxy}" > "${tmp_doc_dir}/${idx}.res"
             ) &
+
+            if (( idx % 15 == 0 )); then
+                wait
+            fi
         done
         wait
 

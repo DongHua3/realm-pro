@@ -4,7 +4,7 @@
 
 **基于 [zhboner/realm](https://github.com/zhboner/realm) 核心打造的专业级 Linux VPS 网络中转管理面板**
 
-[![Release](https://img.shields.io/badge/version-2.1.5-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
+[![Release](https://img.shields.io/badge/version-2.1.6-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine%20%7C%20Arch-orange.svg?style=flat-square)](#-系统与架构支持)
 [![Arch](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64%20%7C%20armv7-brightgreen.svg?style=flat-square)](#-系统与架构支持)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
@@ -80,7 +80,7 @@ re
 ╔═══════════════════════════════════════════════════════════╗
 ║         Realm 高性能网络中转管理面板 (Pro 增强版)         ║
 ╚═══════════════════════════════════════════════════════════╝
- 状态: 运行中 | 自启: 已启用 | 脚本: v2.1.5 | 核心: v2.9.6 | 规则数: 3
+ 状态: 运行中 | 自启: 已启用 | 脚本: v2.1.6 | 核心: v2.9.6 | 规则数: 3
 -------------------------------------------------------------
  1. 添加转发规则 (端口/IPv4/IPv6/PROXY协议)
  2. 查看所有转发规则
