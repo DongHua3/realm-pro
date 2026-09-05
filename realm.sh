@@ -204,6 +204,9 @@ clean_remote_host() {
         fi
     fi
 
+    # 严格安全白名单过滤：杜绝注入任何 Shell 元字符 (如 ; | & ` $ ( ) < > 等)
+    host=$(echo "$host" | tr -cd 'a-zA-Z0-9.:_[]-')
+
     echo "$host"
 }
 
@@ -417,17 +420,40 @@ choose_mirror() {
 get_verified_digest() {
     local tag="$1"
     local asset_name="realm-${REALM_ARCH}.tar.gz"
-    # 直连官方 API 确保信任锚安全
-    curl -fsSL --connect-timeout 10 "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${tag}" 2>/dev/null \
+    # 直连官方 API 确保信任锚安全 (兼容紧凑单行与多行格式)
+    local raw_json
+    raw_json=$(curl -fsSL --connect-timeout 10 "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${tag}" 2>/dev/null)
+    [[ -z "$raw_json" ]] && return
+
+    # 1. 优先使用 Python3 标准库解析 (输入流读取，避免超大 JSON 触发 ARG_MAX)
+    if command -v python3 >/dev/null 2>&1; then
+        local py_hash
+        py_hash=$(echo "$raw_json" | python3 -c "import sys, json
+try:
+    d = json.load(sys.stdin)
+    target = sys.argv[1]
+    h = next((a.get('digest', '').replace('sha256:', '') for a in d.get('assets', []) if a.get('name') == target), '')
+    print(h)
+except Exception:
+    pass" "$asset_name" 2>/dev/null)
+        if [[ -n "$py_hash" && "$py_hash" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "$py_hash"
+            return 0
+        fi
+    fi
+
+    # 2. 通用流式正则提取 (兼容 GNU/BusyBox，无须换行假设)
+    echo "$raw_json" \
+        | grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]+"|"digest"[[:space:]]*:[[:space:]]*"sha256:[a-f0-9]{64}"' \
         | awk -v asset="${asset_name}" '
-            $0 ~ "\"name\":[[:space:]]*\"" asset "\"" { in_asset=1; next }
-            in_asset && $0 ~ /"digest":[[:space:]]*"sha256:[a-f0-9]+"/ {
+            $0 ~ asset { flag=1; next }
+            flag && /"digest"/ {
                 sub(/.*"sha256:/, "");
                 sub(/".*/, "");
                 print $0;
                 exit;
             }
-            in_asset && $0 ~ /"browser_download_url":/ { in_asset=0 }
+            flag && /"name"/ { flag=0 }
         ' || true
 }
 
@@ -610,7 +636,7 @@ EOF
     else
         # 兼容性自愈：如果已有 00-global.toml 缺少 endpoints 字段，自动在首行注入
         if ! grep -q "^endpoints" "$GLOBAL_CONF" 2>/dev/null && ! grep -q "^\[\[endpoints" "$GLOBAL_CONF" 2>/dev/null; then
-            sed -i '1i endpoints = []\n' "$GLOBAL_CONF" 2>/dev/null || true
+            sed -i '1s/^/endpoints = []\n/' "$GLOBAL_CONF" 2>/dev/null || true
         fi
     fi
 
@@ -864,6 +890,28 @@ resolve_target_port() {
     local input="$1"
     [[ -z "$input" || "$input" == "0" ]] && return 1
 
+    # 显式前缀匹配消除歧义: p:80 或 port:80 (指定端口), id:1 (指定序号)
+    if [[ "$input" =~ ^(p|port):([0-9]+)$ ]]; then
+        local p="${BASH_REMATCH[2]}"
+        if [[ -f "${RULES_DIR}/${p}.toml" ]]; then
+            echo "$p"
+            return 0
+        fi
+        return 1
+    elif [[ "$input" =~ ^id:([0-9]+)$ ]]; then
+        local id="${BASH_REMATCH[1]}"
+        local rule_files=()
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && rule_files+=("$f")
+        done < <(ls -1 "$RULES_DIR"/*.toml 2>/dev/null || true)
+        local idx=$((id - 1))
+        if [[ $idx -ge 0 && $idx -lt ${#rule_files[@]} ]]; then
+            basename "${rule_files[$idx]}" .toml
+            return 0
+        fi
+        return 1
+    fi
+
     # 如果直接匹配已有规则端口文件
     if [[ -f "${RULES_DIR}/${input}.toml" ]]; then
         echo "$input"
@@ -1032,13 +1080,21 @@ add_rule() {
 
         # 6. 备注
         read -rp "请输入规则备注说明 (可选，回车跳过): " remark
-        remark=$(echo "$remark" | tr -d '"|\\\r\n')
-        remark=${remark:-"-"}
     fi
+
+    # 统一对 remark 进行双引号、管道符与换行符清洗 (防范 TOML 配置逃逸)
+    remark=$(echo "$remark" | tr -d '"|\\\r\n')
+    remark=${remark:-"-"}
 
     # 校验入参有效性
     if ! validate_port "$l_port" || ! validate_port "$r_port" || [[ -z "$r_host" ]]; then
         error "参数校验失败，无法添加规则！"
+        return 1
+    fi
+
+    # 防范静默覆盖已有规则 (保护 CLI 模式)
+    if [[ -f "${RULES_DIR}/${l_port}.toml" ]]; then
+        error "端口 ${l_port} 的转发规则已存在！如需修改请使用 're edit ${l_port}'，或先使用 're del ${l_port}' 删除。"
         return 1
     fi
 
@@ -1216,7 +1272,7 @@ restart_service() {
     check_sys
     # 启动前自愈校验：确保 00-global.toml 包含 endpoints = []
     if [[ -f "$GLOBAL_CONF" ]] && ! grep -q "^endpoints" "$GLOBAL_CONF" 2>/dev/null && ! grep -q "^\[\[endpoints" "$GLOBAL_CONF" 2>/dev/null; then
-        sed -i '1i endpoints = []\n' "$GLOBAL_CONF" 2>/dev/null || true
+        sed -i '1s/^/endpoints = []\n/' "$GLOBAL_CONF" 2>/dev/null || true
     fi
     info "正在重启 Realm 服务..."
 
@@ -1331,7 +1387,7 @@ run_doctor() {
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 elif command -v nc >/dev/null 2>&1 && timeout 1.5 nc -w 1 -z "$r_host" "$r_port" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
-                elif [[ ! "$r_host" =~ : ]] && timeout 1.5 bash -c "exec 3<>/dev/tcp/${r_host}/${r_port}" >/dev/null 2>&1; then
+                elif [[ ! "$r_host" =~ : ]] && timeout 1.5 bash -c 'exec 3<>/dev/tcp/"$1"/"$2"' _ "$r_host" "$r_port" >/dev/null 2>&1; then
                     r_stat="${GREEN}TCP连通${PLAIN}"
                 elif command -v curl >/dev/null 2>&1; then
                     curl_target="$r_host"
@@ -1392,7 +1448,7 @@ network_diagnostic() {
         if nc -w 3 -z "$test_target" "$test_port" 2>/dev/null || nc -z -v -w 3 "$test_target" "$test_port" 2>/dev/null; then
             ok=true
         fi
-    elif [[ ! "$test_target" =~ : ]] && timeout 3 bash -c "exec 3<>/dev/tcp/${test_target}/${test_port}" >/dev/null 2>&1; then
+    elif [[ ! "$test_target" =~ : ]] && timeout 3 bash -c 'exec 3<>/dev/tcp/"$1"/"$2"' _ "$test_target" "$test_port" >/dev/null 2>&1; then
         ok=true
     elif command -v curl >/dev/null 2>&1; then
         local curl_target="$test_target"

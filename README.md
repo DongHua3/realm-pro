@@ -4,13 +4,13 @@
 
 **基于 [zhboner/realm](https://github.com/zhboner/realm) 核心打造的专业级 Linux VPS 网络中转管理面板**
 
-[![Release](https://img.shields.io/badge/version-2.1.6-blue.svg?style=flat-square)](https://github.com/zhboner/realm)
+[![Script](https://img.shields.io/badge/script--version-2.1.6-blue.svg?style=flat-square)](realm.sh)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu%20%7C%20CentOS%20%7C%20Alpine%20%7C%20Arch-orange.svg?style=flat-square)](#-系统与架构支持)
 [![Arch](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64%20%7C%20armv7-brightgreen.svg?style=flat-square)](#-系统与架构支持)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Core](https://img.shields.io/badge/core-Rust%20%2F%20Realm%20v2.x-red.svg?style=flat-square)](https://github.com/zhboner/realm)
 
-[核心亮点](#-核心亮点) • [快速开始](#-快速开始) • [界面预览](#-控制面板界面预览) • [使用教程](#-详细使用教程) • [快捷命令](#-快捷命令) • [实战场景](#-深度实战场景直击-vps-核心痛点) • [常见问题](#-常见问题-faq)
+[核心亮点](#-核心亮点) • [快速开始](#-快速开始) • [界面预览](#️-控制面板界面预览) • [使用教程](#-详细使用教程) • [快捷命令](#️-快捷命令汇总) • [实战场景](#-深度实战场景直击-vps-核心痛点) • [常见问题](#-常见问题-faq)
 
 </div>
 
@@ -57,8 +57,11 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh)
 ```
 
-> **提示（大陆 / 访问受限 VPS 加速源）**：若无法直接连接 GitHub，可使用内置镜像代理：
+> **提示（大陆 / 访问受限 VPS 加速源）**：若无法直接连接 GitHub，可使用高速镜像代理：
 > ```bash
+> # 镜像源 1 (推荐)
+> bash <(curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh)
+> # 镜像源 2
 > bash <(curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/DongHua3/realm-pro/main/realm.sh)
 > ```
 >

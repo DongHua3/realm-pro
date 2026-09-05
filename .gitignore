@@ -1,0 +1,14 @@
+# AI & LLM development rules
+GEMINI.md
+.gemini/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Temporary & backup files
+*.tmp
+*.bak
+*.tar.gz
+*.swp
+*.log
